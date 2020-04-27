@@ -1,0 +1,66 @@
+# vim: syntax=python tabstop=4 expandtab
+# coding: utf-8
+
+import os
+ROOT = "/mnt/lustre/scratch/home/uvi/be/hde/cd-bench"
+
+configfile: os.path.join(ROOT, "flow", "config.json")
+#REPS, SAMS = glob_wildcards("sims/{replicate}/output/bam/{sample, R\d+}.sam")
+#REPS = config['replicate']
+#REPS = config['replicate'].strip().split(' ')
+REPS_ALL = glob_wildcards(os.path.join(ROOT, "sims/{rep_id}/output"))
+#SAMS = glob_wildcards(os.path.join(ROOT, "sims/%s/output/bam/{sample}.sam" % REPS))
+#SAMS_TUM = glob_wildcards(os.path.join(ROOT, "sims/%s/output/bam/{sample,R\d+}.sam" % REPS))
+SAMPLES="R1 R2 R3 R4 R5 RN".split()
+
+include: "bwa.smk"
+include: "util.smk"
+include: "mutect2.smk"
+include: "multisnv.smk"
+include: "pyclone.smk"
+
+# MultiSNV
+rule run_multisnv:
+    input:  "multisnv.vcf"
+    #input:  ["data/%s/multisnv.vcf" % rep for rep in REPS_ALL.rep_id]
+
+# pseudo-rule to run read mapping
+rule run_bwa:
+    input:  ["%s.bam" % s for s in SAMPLES]
+
+# prepare working directories for downstream analyses
+rule prep_workdir:
+  input:
+    ref="sims/{replicate}/output/ref.fa",
+    bed="sims/{replicate}/output/bed/N.cn.bed",
+    sam="sims/{replicate}/output/bam",
+    som="sims/{replicate}/output/somatic.vcf"
+  output:
+    ref="data/{replicate}/ref.fa",
+    bed="data/{replicate}/ref.bed",
+    som="data/{replicate}/sim/somatic.vcf"
+  params:
+    dir="data/{replicate}",
+    simdir="data/{replicate}/sim",
+    beddir="sims/{replicate}/output/bed"
+  shell:
+    """
+    # create working dir if necessary
+    if [[ -d {params.dir} ]]; then
+      mkdir -p {params.dir}
+      mkdir -p {params.simdir}
+    fi
+
+    cp {input.ref} {output.ref}
+    cp {input.bed} {output.bed}
+    cp {input.som} {output.som}
+
+    for fn in {input.sam}/*.sam; do
+      path_sam=$(readlink -e $fn)
+      ln -s $path_sam {params.simdir}/
+      cp ${{path_sam%.sam}}.vars.csv {params.simdir}/
+      fn_sam=$(basename $fn)
+      sample=${{fn_sam%.sam}}
+      cp {params.beddir}/$sample.cn.bed {params.simdir}/
+    done
+    """
