@@ -12,7 +12,7 @@
 #------------------------------------------------------------------------------
 # author   : Harald Detering
 # email    : harald.detering@gmail.com
-# modified : 2020-04-21
+# modified : 2020-04-28
 #------------------------------------------------------------------------------
 
 from __future__ import print_function
@@ -58,9 +58,10 @@ def parse_args():
   
   # parse INFO-to-FORMAT mapping
   args_dict['info-to-format'] = {}
-  for fifo in args.info_to_format:
-    fi, fo = fifo.split(':')
-    args_dict['info-to-format'][fi] = fo
+  if args.info_to_format:
+    for fifo in args.info_to_format:
+      fi, fo = fifo.split(':')
+      args_dict['info-to-format'][fi] = fo
 
   return args_dict
 
