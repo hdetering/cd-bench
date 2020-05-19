@@ -8,7 +8,7 @@
 #------------------------------------------------------------------------------
 # author   : Harald Detering
 # email    : harald.detering@gmail.com
-# modified : 2020-03-18
+# modified : 2020-05-18
 #------------------------------------------------------------------------------
 
 BEGIN {
@@ -25,14 +25,20 @@ BEGIN {
   rc_tot = 0;
   rc_alt = 0;
   # split info fields
-  split($8, tags, ";");
+  split( $9, tags, ":");
+  split($10, vals, ":");
   for (i in tags) {
-    split(tags[i], kv, "=");
-    if (kv[1] == "DP") {
-      rc_tot = kv[2];
+    if (tags[i] == "DP") {
+      rc_tot = vals[i];
     }
-    else if (kv[1] == "AC") {
-      rc_alt = kv[2];
+    else if (tags[i] == "AD") {
+      split(vals[i], ad, ",");
+      # get max AD among ALT alleles
+      max_ad = 0;
+      for (i=2; i<=length(ad); i++) {
+        if (ad[i] > max_ad) max_ad = ad[i];
+      }
+      rc_alt = max_ad;
     }
   }
 
