@@ -135,6 +135,33 @@ def CASet(variants, tree1, tree2, clust1, clust2, snv_clust1, snv_clust2):
   n_comp = choose(n_vars, 2) # number of comparisons
   return cum_dist / n_comp
 
+def DISC(variants, tree1, tree2, clust1, clust2, snv_clust1, snv_clust2):
+  '''
+  Calculate Distinctly Inherited Set Comparison (DISC) distance between two trees.
+  '''
+  cum_dist = 0.0 # cumulative distance
+  for i in variants:
+    for j in variants:
+      if i == j:
+        continue 
+      # calculate ancestral sets for mutations i and j in tree1
+      A1_i = A(i, tree1, clust1, snv_clust1) if i in snv_clust1 else set()
+      A1_j = A(j, tree1, clust1, snv_clust1) if j in snv_clust1 else set()
+      # calculate common ancestor set of mutations i and j in tree1
+      D1 = A1_i.difference(A1_j)
+      # calculate ancestral sets for mutations i and j in tree2
+      A2_i = A(i, tree2, clust2, snv_clust2) if i in snv_clust2 else set()
+      A2_j = A(j, tree2, clust2, snv_clust2) if j in snv_clust2 else set()
+      # calculate common ancestor set of mutations i and j in tree2
+      D2 = A2_i.difference(A2_j)
+      
+      jacc_dist = Jaccard_dist_weighted(D1, D2)
+      cum_dist += jacc_dist * (i[1]*j[1])
+
+  n_vars = sum([v for k, v in variants]) # global number of variants
+  n_comp = n_vars * (n_vars-1) # number of comparisons
+  return cum_dist / n_comp
+
 def adjacency_list_to_tree(adj_list):
   '''Initialize ete3.Tree using a set of edges.'''
   nodes = {}
@@ -293,6 +320,9 @@ def main(args):
   if args.CASet:
     # perform distance calculation
     tree_dist = CASet(snvs, true_tree, inf_tree, true_clusters, inf_clusters, true_snv_clust, inf_snv_clust)
+  elif args.DISC:
+    # perform distance calculation
+    tree_dist = DISC(snvs, true_tree, inf_tree, true_clusters, inf_clusters, true_snv_clust, inf_snv_clust)
 
   print('Tree distance: {:.4f}'.format(tree_dist))
 
