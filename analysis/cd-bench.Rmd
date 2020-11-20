@@ -1,0 +1,189 @@
+---
+title: "Clonal Deconvolution Benchmarking Study"
+author: "Harald Detering"
+date: "October 12, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(tidyverse)
+library(ggforce) # geom_sina
+
+data_dir <- '100'
+df_rep <- read_csv( file.path(data_dir, 'df_rep.csv'), skip = 1,
+                    col_names = c('id_rep', 'n_clones', 'n_samples', 'purity', 'depth'),
+                    col_types = 'ciidi'
+                    )
+```
+
+## Dataset
+
+This simulation study contains 100 replicates with the following properties:
+(Expected distributions indicated by dashed red lines.)
+
+```{r meta_reps_clones}
+ggplot( df_rep ) + geom_bar( aes(x = n_clones) ) +
+  geom_hline( yintercept = 100/(10-3+1), linetype = 'dashed', color = 'red' ) +
+  ggtitle( 'Number of clones' )
+```
+
+```{r meta_reps_samples}
+ggplot( df_rep ) + geom_bar( aes(x = n_samples) ) +
+  geom_hline( yintercept = 100/(10-4+1), linetype = 'dashed', color = 'red' ) +
+  ggtitle( 'Number of samples' )
+```
+
+```{r meta_reps_clones_samples}
+df_rep %>% dplyr::group_by( n_samples, n_clones) %>% tally() %>%
+  ggplot() + geom_point( aes(x = n_samples, y = n_clones, size = n, fill = as.factor(n)), shape = 21 ) +
+  scale_fill_brewer( palette = 'Reds' ) +
+  ggtitle( 'Number of clones by number of samples' )
+```
+
+```{r meta_reps_depth}
+ggplot( df_rep ) + geom_bar( aes(x = as.factor(depth)) ) +
+  labs( x = 'depth' ) +
+  ggtitle( 'Sequencing depth' )
+```
+
+```{r meta_reps_purity}
+df_rep %>%
+  ggplot( aes(x = 1-purity) ) + 
+  geom_histogram( aes(y = ..density..), bins = 20 ) +
+  stat_function( fun = dbeta, args = list(shape1 = 1.65, shape2 = 5.45 ), color = 'red', lty = 2 ) +
+  ggtitle( 'Normal cell contamination' )
+```
+
+```{r meta_reps_purity_depth}
+df_rep %>%
+  ggplot( aes(x = as.factor(depth), y = 1-purity) ) + 
+  geom_violin() +
+  geom_sina() +
+  labs( x = 'depth' ) +
+  ggtitle( 'Normal cell contamination by sequencing depth' )
+```
+
+## Results
+
+### Clustering accuracy
+
+```{r, clust_load_data, message=F}
+fn_clust <- file.path( data_dir, 'metrics_clustering.csv' )
+df_clust <- read_csv( fn_clust ) %>%
+  replace_na( list(n_clust_inf = 0) )
+```
+
+The first qualitative criterion of interest is deconvolution success, i.e., for how many replicates a result was produced at all.
+
+```{r, clust_success}
+df_clust %>%
+  inner_join( df_rep, by = c('id_rep') ) %>%
+  mutate( tool = str_replace(tool, '_strict', '') ) %>%
+  complete( id_rep, tool, fill = list(n_clust_inf = 0) ) %>%
+  mutate( success = (n_clust_inf > 0) ) %>%
+  ggplot( aes(x = success) ) + geom_bar() +
+  facet_wrap( ~ tool )
+```
+
+#### Number of clusters
+
+The most basic clustering metric is the number of inferred vs. true clones.
+
+```{r, clust_nclones}
+df_clust %>% dplyr::filter( n_clust_inf > 0 ) %>%
+  #mutate( delta = ifelse(n_clust_inf-n_clust_true==0, 0, ifelse(n_clust_inf-n_clust_true>0, 1, -1))) %>%
+  mutate( tool = str_replace(tool, '_strict', '') ) %>%
+  ggplot( aes(x = tool, y = n_clust_inf-n_clust_true) ) +
+  geom_violin() + geom_sina() +
+  geom_abline(intercept = 0, slope = 0, color = 'tomato', lty = 2 ) +
+  theme( axis.text.x = element_text(angle = 45, hjust=1) )
+
+df_clust %>% dplyr::filter( n_clust_inf > 0 ) %>%
+  ggplot( aes(x = n_clust_inf-n_clust_true) ) +
+  geom_histogram( binwidth = 1 ) +
+  geom_vline(aes( xintercept = 0), color = "blue", linetype = "dashed", size = 1 ) +
+  facet_wrap( ~tool, scales = 'free' ) +
+  ggtitle( 'Difference inferred number of clusters to truth' )
+
+df_clust %>% dplyr::filter( n_clust_inf > 0 ) %>%
+  ggplot( aes(x = n_clust_inf) ) +
+  geom_histogram( binwidth = 1 ) +
+  facet_wrap( ~tool, scales = 'free' ) +
+  ggtitle( 'Inferred number of clusters' )
+
+# df_clust %>% dplyr::filter( tool == 'pyclone', n_clust_inf > 0 ) %>% 
+#   inner_join(df_rep) %>%
+#   mutate( delta = ifelse(n_clust_inf-n_clust_true==0, 0, ifelse(n_clust_inf-n_clust_true>0, 1, -1))) %>%
+#   mutate( tool = str_replace(tool, '_strict', '') ) %>%
+#   ggplot( aes(x = tool, y = n_clust_inf-n_clust_true) ) +
+#   geom_violin() + geom_sina() +
+#   facet_wrap(~depth) +
+#   geom_abline(intercept = 0, slope = 0, color = 'tomato', lty = 2 )
+# 
+# df <- df_clust %>% dplyr::filter( tool == 'pyclone', n_clust_inf > 0 ) %>% 
+#   inner_join(df_rep)
+```
+
+Observation:
+
+* although not visible in this plot, PhyloWGS inferred a single cluster in all but one replicate. (I don't no why, yet...)
+* pyclone infers by far more clusters than other tools. this is in conflict with other results, e.g. in the MOBSTER paper, where PyClone **and** SciClone showed similar tendencies to over-splitting
+* should this be the final result, a logarithmic y-scale would be better (e.g. log(k_fit/k_true) as in MOBSTER paper)
+
+#### Clustering metrics (ARI, V-measure)
+
+Important clustering accuracy measures are the Adjusted Rand Index (ARI) and the V-measure, which is composed of homogeneity and completeness.
+
+```{r, clust_metrics, warning=F}
+df_clust %>% dplyr::filter( n_clust_inf > 0 ) %>%
+  mutate( tool = str_replace(tool, '_strict', '') ) %>%
+  pivot_longer( cols = c(ARI, V_measure, homogeneity, completeness), names_to = 'metric' ) %>%
+  ggplot( aes(x = tool, y = value) ) +
+  geom_boxplot() +
+  #geom_violin() + geom_sina() +
+  facet_wrap( ~ metric, nrow = 1 ) +
+  theme( axis.text.x = element_text(angle = 45, hjust=1) )
+```
+
+### Cellular prevalence accuracy
+
+Clonal deconvolution tools typically output the cellular prevalence, or cancer cell fraction (CCF), of each inferred clone. To gauge how similar these inferred prevalences are to the simulated ones, we calculate the mean squared error between both values for all mutations. For this, each mutation is given the prevalence of the inferred cluster it was assigned to.
+
+```{r, prev_metrics, message=F}
+fn_metr_prev <- file.path( data_dir, 'metrics_prevalence.csv' )
+df_metr_prev <- read_csv( fn_metr_prev )
+
+df_metr_prev %>% dplyr::filter( n_clust_inf > 0 ) %>%
+  ggplot( aes(x = tool, y = prev_msq) ) +
+  geom_boxplot() +
+  #geom_violin() + geom_sina() +
+  labs( y = 'mean squared error') +
+  theme( axis.text.x = element_text(angle = 45, hjust=1) )
+```
+
+SciClone does not output a prevalence estimate per cluster, but probabilistic cluster assignment for each variant. We could use the read counts to for each sample and use that as "inferred prevalence" but might be giving SciClone a preferential treatment.
+
+### Phylogenetic accuracy
+
+For clonal deconvolution tools that output a clone phylogeny, the tree distance metrics CASet and DISC are reported.
+
+```{r, phylo_load_data, message=F}
+fn_phylo <- file.path( data_dir, 'metrics_phylogeny.csv' )
+df_phylo <- read_csv( fn_phylo )
+
+df_phylo %>%
+  pivot_longer( cols = c(CASet_isect, CASet_union, DISC_isect, DISC_union), names_to = 'metric' ) %>%
+  mutate( tool = str_replace(tool, '_strict', '') ) %>%
+  ggplot( aes(x = tool, y = value) ) +
+  geom_boxplot() +
+  #geom_violin() + geom_sina() +
+  facet_wrap( ~ metric ) +
+  theme( axis.text.x = element_text(angle = 45, hjust=1) )
+```
+
+Notes / Observations:
+
+* Cloe produced trees including homoplasies, which do not have a defined CASet or DISC distance
+* although PhyloWGS seems to outperform LICHeE, remember that PhyloWGS only reported a single cluster in virtually all cases.
