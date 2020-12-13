@@ -11,11 +11,13 @@ knitr::opts_chunk$set(echo = FALSE)
 library(tidyverse)
 library(ggforce) # geom_sina
 
-data_dir <- '100'
-df_rep <- read_csv( file.path(data_dir, 'df_rep.csv'), skip = 1,
-                    col_names = c('id_rep', 'n_clones', 'n_samples', 'purity', 'depth'),
-                    col_types = 'ciidi'
-                    )
+df_rep <- list.files( pattern = 'df_rep.csv', recursive = TRUE ) %>%
+  map_df( ~ { read_csv(., skip = 1,
+                       col_names = c('id_rep', 'n_clones', 'n_samples', 'purity', 'depth', 'n_snvs', 'cnv_rate'),
+                       col_types = 'ciidiid') } )
+df_cn <- read_delim( 'reps_clones_cn.tsv', delim = '\t', 
+                   col_names = c('id_rep', 'id_clone', 'chrom', 'start', 'end', 'cn_A', 'cn_B'),
+                   col_type = 'fcciidd')
 ```
 
 ## Dataset
@@ -23,24 +25,46 @@ df_rep <- read_csv( file.path(data_dir, 'df_rep.csv'), skip = 1,
 This simulation study contains 100 replicates with the following properties:
 (Expected distributions indicated by dashed red lines.)
 
+### Number of clones
+
 ```{r meta_reps_clones}
 ggplot( df_rep ) + geom_bar( aes(x = n_clones) ) +
-  geom_hline( yintercept = 100/(10-3+1), linetype = 'dashed', color = 'red' ) +
-  ggtitle( 'Number of clones' )
+  geom_hline( yintercept = 500/(10-2+1), linetype = 'dashed', color = 'red' ) +
+  #ggtitle( 'Number of clones' ) +
+  scale_x_continuous( breaks = 2:10 ) +
+  labs( x = 'number of clones' ) +
+  theme_minimal()
+ggsave( filename = 'plot/reps_nclones.pdf', device = 'pdf', width = 6, height = 3 )
+ggsave( filename = 'plot/reps_nclones.png', device = 'png', width = 6, height = 3 )
 ```
+
+### Number of samples
 
 ```{r meta_reps_samples}
 ggplot( df_rep ) + geom_bar( aes(x = n_samples) ) +
-  geom_hline( yintercept = 100/(10-4+1), linetype = 'dashed', color = 'red' ) +
-  ggtitle( 'Number of samples' )
+  geom_hline( yintercept = 500/(10-3+1), linetype = 'dashed', color = 'red' ) +
+  scale_x_continuous( breaks = 3:10 ) +
+  labs( x = 'number of samples' ) +
+  theme_minimal()
+ggsave( filename = 'plot/reps_nsamples.pdf', device = 'pdf', width = 6, height = 3 )
+ggsave( filename = 'plot/reps_nsamples.png', device = 'png', width = 6, height = 3 )
 ```
+
+### Number of clones and samples
 
 ```{r meta_reps_clones_samples}
 df_rep %>% dplyr::group_by( n_samples, n_clones) %>% tally() %>%
-  ggplot() + geom_point( aes(x = n_samples, y = n_clones, size = n, fill = as.factor(n)), shape = 21 ) +
-  scale_fill_brewer( palette = 'Reds' ) +
-  ggtitle( 'Number of clones by number of samples' )
+  ggplot() + geom_point( aes(x = n_samples, y = n_clones, size = n, fill = n), shape = 21 ) +
+  scale_fill_continuous(type = "viridis") +
+  scale_x_continuous( breaks = 3:10, minor_breaks = NULL ) +
+  scale_y_continuous( breaks = 2:10, minor_breaks = NULL ) +
+  labs( x = 'number of samples', y = 'number of clones' ) +
+  theme_minimal()
+ggsave( filename = 'plot/reps_nsamples_nclones.pdf', device = 'pdf', width = 6, height = 3 )
+ggsave( filename = 'plot/reps_nsamples_nclones.png', device = 'png', width = 6, height = 3 )
 ```
+
+### Sequencing depth
 
 ```{r meta_reps_depth}
 ggplot( df_rep ) + geom_bar( aes(x = as.factor(depth)) ) +
@@ -48,12 +72,17 @@ ggplot( df_rep ) + geom_bar( aes(x = as.factor(depth)) ) +
   ggtitle( 'Sequencing depth' )
 ```
 
+### Purity
+
 ```{r meta_reps_purity}
 df_rep %>%
   ggplot( aes(x = 1-purity) ) + 
-  geom_histogram( aes(y = ..density..), bins = 20 ) +
+  geom_histogram( aes(y = ..density..), bins = 20, fill = 'grey42' ) +
   stat_function( fun = dbeta, args = list(shape1 = 1.65, shape2 = 5.45 ), color = 'red', lty = 2 ) +
-  ggtitle( 'Normal cell contamination' )
+  theme_minimal()
+  #ggtitle( 'Normal cell contamination' )
+ggsave( filename = 'plot/reps_purity.pdf', device = 'pdf', width = 6, height = 3 )
+ggsave( filename = 'plot/reps_purity.png', device = 'png', width = 6, height = 3 )
 ```
 
 ```{r meta_reps_purity_depth}
@@ -62,8 +91,32 @@ df_rep %>%
   geom_violin() +
   geom_sina() +
   labs( x = 'depth' ) +
-  ggtitle( 'Normal cell contamination by sequencing depth' )
+  ggtitle( 'Normal cell contamination by sequencing depth' ) +
+  theme_minimal()
 ```
+
+### Number of SNVs
+
+```{r meta_reps_snv}
+df_rep %>%
+  ggplot( aes(x = n_snvs) ) + 
+  geom_histogram( bins = 50, fill = 'grey42' ) +
+  labs( x = 'number of SNVs' ) +
+  #stat_function( fun = dbeta, args = list(shape1 = 1.65, shape2 = 5.45 ), color = 'red', lty = 2 ) +
+  theme_minimal()
+  #ggtitle( 'Normal cell contamination' )
+ggsave( filename = 'plot/reps_nsnvs.pdf', device = 'pdf', width = 6, height = 3 )
+ggsave( filename = 'plot/reps_nsnvs.png', device = 'png', width = 6, height = 3 )
+```
+
+
+### Copy number-aberrant regions
+
+```{r meta_reps_cn}
+# calculate the total length of diploid regions per 
+```
+
+
 
 ## Results
 
