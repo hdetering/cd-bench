@@ -1,0 +1,8 @@
+cd_tool,var1,cor_n_clust_true,cor_n_samples,cor_purity,cor_n_snvs,cor_depth,p.adj.signif_n_clust_true,p.adj.signif_n_samples,p.adj.signif_purity,p.adj.signif_n_snvs,p.adj.signif_depth
+cloe,prev_msq,-0.47,-0.018,0.4,-0.047,0.016,****,ns,****,ns,ns
+clonefinder,prev_msq,-0.45,0.13,0.21,0.016,-0.19,****,ns,**,ns,*
+lichee,prev_msq,-0.66,0.13,0.39,0.014,-0.11,****,ns,****,ns,ns
+phylowgs,prev_msq,0.77,-0.24,-0.21,0.027,0.075,****,ns,ns,ns,ns
+pyclone,prev_msq,0.1,-0.22,0.38,0.022,0.16,ns,ns,*,ns,ns
+pyclonevi,prev_msq,0.43,-0.11,0.36,0.094,0.024,****,ns,****,ns,ns
+sciclone,prev_msq,-0.66,0.09,0.29,-0.092,-0.067,****,ns,**,ns,ns
