@@ -13,10 +13,15 @@ library(ggforce) # geom_sina
 library(rstatix) # wilcox_test
 library(ggpubr) # stat_pvalue_manual
 library(scales) # trans_breaks
+library(lemon) # reposition_legend
+library(ggh4x) # facet_nested_wrap
 
 # define significance levels for p-values
 psig_cut = c(0, 0.001, 0.01, 0.05, 1)
 psig_sym = c("***", "**", "*", "")
+
+# color blind-friendly palette
+cbPalette <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
 
 data_dir <- 'data'
 # df_rep <- list.files( pattern = 'df_rep.csv', recursive = TRUE ) %>%
@@ -78,6 +83,21 @@ df_phylo_cn2_seqz <- df_phylo %>%
   dplyr::filter( cn_tool == 'seqz', cn_filter == 'cn2' ) %>%
   unite( 'lbl', cn_filter, cn_tool, sep = '\n', remove = F )
 ```
+
+```{r util}
+## utility functions
+
+# place legend in empty facets
+shift_legend <- function(p) {
+    pnls <- cowplot::plot_to_gtable(p) %>% gtable::gtable_filter("panel") %>%
+      with(setNames(grobs, layout$name)) %>% purrr::keep(~identical(.x,zeroGrob()))
+
+    if( length(pnls) == 0 ) stop( "No empty facets in the plot" )
+
+    lemon::reposition_legend( p, "center", panel=names(pnls) )
+}
+```
+
 
 Let's try some regression models on relating the performance scores to influence variables
 
@@ -284,11 +304,15 @@ p_success <- df_clust %>%
   separate( tool, c('cd_tool', 'cn_filter', 'cn_tool'), sep = '_', remove = F, fill = 'right') %>%
   dplyr::filter( cn_filter == 'cn2', cn_tool == 'seqz' ) %>%
   ggplot( aes(x = success) ) + geom_bar( aes(fill = success) ) +
-  scale_fill_manual( values = c('red3', 'green3') ) +
+  scale_fill_manual( values = c('grey', 'steelblue') ) +
   facet_wrap( ~ cd_tool ) +
-  theme_minimal()
-ggsave( filename = 'plot/success.pdf', plot = p_success, device = 'pdf', width = 8, height = 6 )
-ggsave( filename = 'plot/success.png', plot = p_success, device = 'png', width = 8, height = 6 )
+  theme_minimal() +
+  theme( strip.text = element_text(size = 10),
+         axis.text.x = element_blank(),
+         axis.title.x = element_blank() )
+p_success <- shift_legend(p_success)
+ggsave( filename = 'plot/success.pdf', plot = p_success, device = 'pdf', width = 4, height = 3 )
+ggsave( filename = 'plot/success.png', plot = p_success, device = 'png', width = 4, height = 3 )
 p_success
 ```
 
@@ -431,22 +455,183 @@ Observation:
 * pyclone infers by far more clusters than other tools. this is in conflict with other results, e.g. in the MOBSTER paper, where PyClone **and** SciClone showed similar tendencies to over-splitting
 * should this be the final result, a logarithmic y-scale would be better (e.g. log(k_fit/k_true) as in MOBSTER paper)
 
+```{r clust_num_nclones}
+df_clust_cn2_seqz <- df_clust %>% 
+  dplyr::filter( n_clust_inf > 0, cn_tool == 'seqz', cn_filter == 'cn2' ) %>%
+  unite( 'lbl', cn_filter, cn_tool, sep = '\n', remove = F )
+p_clust_num_nclones <- df_clust_cn2_seqz %>% 
+  dplyr::filter( n_clust_inf <= 700 ) %>% 
+  ggplot( aes(x = as.factor(n_clust_true), y = n_clust_inf-n_clust_true) ) +
+  geom_violin() + geom_boxplot( width = .2 ) +
+  #geom_label( data = df_clust_cn2_seqz %>% group_by(cd_tool) %>% summarise(r2 = cor(n_clust_true, n_clust_inf, method = "pearson"), y_max = max(n_clust_inf)), aes(x = 1, y = y_max, label = sprintf('r2 = %.2f', r2)), alpha = 0.5, hjust = 'inward', vjust = 'inward' ) +
+  geom_hline(aes( yintercept = 0), color = "blue", size = 1 ) +
+  facet_wrap( ~cd_tool, nrow = 4, scales = 'free' ) +
+  labs( x = 'simulated no. clones', y = 'clone number error' ) +
+  #ggtitle( 'Difference inferred number of clusters to truth' ) +
+  theme_minimal()
+#p_clust_num_nclones <- shift_legend(p_clust_num_nclones)
+ggsave( filename = 'plot/clust_num_nclones.pdf', plot = p_clust_num_nclones, device = 'pdf', width = 6, height = 8 )
+ggsave( filename = 'plot/clust_num_nclones.png', plot = p_clust_num_nclones, device = 'png', width = 6, height = 8 )
+p_clust_num_nclones
+```
 
-Let's split number of inferred clusters by influencing variables.
+```{r clust_num_nsamples}
+df_clust_cn2_seqz <- df_clust %>% 
+  dplyr::filter( n_clust_inf > 0, cn_tool == 'seqz', cn_filter == 'cn2' ) %>%
+  unite( 'lbl', cn_filter, cn_tool, sep = '\n', remove = F )
+p_nclust <- df_clust_cn2_seqz %>% 
+  dplyr::filter( n_clust_inf <= 700 ) %>% 
+  inner_join( df_rep, by = 'id_rep' ) %>% 
+  ggplot( aes(x = as.factor(n_samples), y = n_clust_inf - n_clust_true) ) +
+  geom_violin() + geom_boxplot( width = .2 ) +
+  geom_hline(aes( yintercept = 0), color = "blue", size = 1 ) +
+  facet_wrap( ~cd_tool, nrow = 4, scales = 'free_y' ) +
+  labs( x = 'number of samples', y = 'clone number error' ) +
+  #ggtitle( 'Difference inferred number of clusters to truth' ) +
+  theme_minimal()
+ggsave( filename = 'plot/clust_num_nsamples.pdf', plot = p_nclust, device = 'pdf', width = 6, height = 8 )
+ggsave( filename = 'plot/clust_num_nsamples.png', plot = p_nclust, device = 'png', width = 6, height = 8 )
+p_nclust
+```
+
+```{r clust_num_purity}
+df_clust_cn2_seqz <- df_clust %>% 
+  dplyr::filter( n_clust_inf > 0, cn_tool == 'seqz', cn_filter == 'cn2' ) %>%
+  inner_join( df_rep, by = 'id_rep' )
+p_nclust_purity <- df_clust_cn2_seqz %>% 
+  dplyr::filter( n_clust_inf <= 700 ) %>% 
+  ggplot( aes(x = purity, y = n_clust_inf - n_clust_true) ) +
+  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = FALSE) +
+  #scale_fill_distiller(palette= "Spectral", direction=1) +
+  scale_fill_gradient( low = 'white', high = 'red' ) +
+  geom_hline(aes( yintercept = 0), color = 'blue', size = .5 ) +
+  geom_smooth( se = FALSE, color = 'green3', size = .5 ) +
+  geom_point( size = .5 ) +
+  facet_wrap( ~cd_tool, nrow = 4, scales = 'free' ) +
+  labs( x = 'tumor purity', y = 'clone number error' ) +
+  theme_minimal() +
+  theme( axis.text = element_text(size = 8) ) +
+  theme(legend.position = c(1,0),
+        legend.justification = c(1, 0),
+        legend.direction = 'horizontal')
+p_nclust_purity <- shift_legend(p_nclust_purity)
+ggsave( filename = 'plot/clust_num_purity.pdf', plot = p_nclust_purity, device = 'pdf', width = 6, height = 6 )
+ggsave( filename = 'plot/clust_num_purity.png', plot = p_nclust_purity, device = 'png', width = 6, height = 6 )
+p_nclust_purity
+```
+
+```{r clust_num_nsnvs}
+df_clust_cn2_seqz <- df_clust %>% 
+  dplyr::filter( n_clust_inf > 0, cn_tool == 'seqz', cn_filter == 'cn2' ) %>%
+  inner_join( df_rep, by = 'id_rep' )
+p_nclust_nsnvs <- df_clust_cn2_seqz %>% 
+  dplyr::filter( n_clust_inf <= 700 ) %>% 
+  ggplot( aes(x = n_snvs, y = n_clust_inf - n_clust_true) ) +
+  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = FALSE) +
+  scale_fill_gradient( low = 'white', high = 'red' ) +
+  geom_hline(aes( yintercept = 0), color = "blue" ) +
+  geom_smooth( se = FALSE, color = 'green3' ) +
+  geom_point( size = .5 ) +
+  facet_wrap( ~cd_tool, nrow = 4, scales = 'free_y' ) +
+  labs( x = 'number of SNVs', y = 'clone number error' ) +
+  theme_minimal() +
+  theme( axis.text = element_text(size = 8) ) +
+  theme(legend.position = c(1,0),
+        legend.justification = c(1, 0),
+        legend.direction = 'horizontal')
+p_nclust_nsnvs <- shift_legend(p_nclust_nsnvs)
+ggsave( filename = 'plot/clust_num_nsnvs.pdf', plot = p_nclust_nsnvs, device = 'pdf', width = 6, height = 6 )
+ggsave( filename = 'plot/clust_num_nsnvs.png', plot = p_nclust_nsnvs, device = 'png', width = 6, height = 6 )
+p_nclust_nsnvs
+```
+
+```{r clust_num_depth}
+df_clust_cn2_seqz <- df_clust %>% 
+  dplyr::filter( n_clust_inf > 0, cn_tool == 'seqz', cn_filter == 'cn2' ) %>%
+  inner_join( df_rep, by = 'id_rep' )
+p_clust_num_depth <- df_clust_cn2_seqz %>% 
+  dplyr::filter( n_clust_inf <= 700 ) %>% 
+  ggplot( aes(x = as.factor(depth), y = n_clust_inf - n_clust_true) ) +
+  geom_violin() + geom_boxplot( width = .2 ) +
+  geom_hline(aes( yintercept = 0), color = "blue", size = 1 ) +
+  facet_wrap( ~cd_tool, nrow = 4, scales = 'free_y' ) +
+  labs( x = 'sequencing depth', y = 'clone number error' ) +
+  #ggtitle( 'Difference inferred number of clusters to truth' ) +
+  theme_minimal()
+ggsave( filename = 'plot/clust_num_depth.pdf', plot = p_clust_num_depth, device = 'pdf', width = 6, height = 6 )
+ggsave( filename = 'plot/clust_num_depth.png', plot = p_clust_num_depth, device = 'png', width = 6, height = 6 )
+p_clust_num_depth
+```
+
+```{r clust_num_cnv}
+df_clust_cn2_seqz <- df_clust %>% 
+  dplyr::filter( n_clust_inf > 0, cn_tool == 'seqz', cn_filter == 'cn2' ) %>%
+  inner_join( df_rep, by = 'id_rep' )
+p_clust_num_cnv <- df_clust_cn2_seqz %>%
+  dplyr::filter( n_clust_inf <= 700 ) %>%
+  ggplot( aes(x = cnv_burden, y = n_clust_inf - n_clust_true) ) +
+  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = FALSE) +
+  scale_fill_gradient( low = 'white', high = 'red' ) +
+  geom_hline(aes( yintercept = 0), color = "blue", size = .5 ) +
+  geom_smooth( se = FALSE, color = 'green3', size = .5 ) +
+  geom_point( size = .5 ) +
+  facet_wrap( ~cd_tool, nrow = 4, scales = 'free_y' ) +
+  labs( x = 'CNV burden', y = 'clone number error' ) +
+  theme_minimal() +
+  theme(legend.position = c(1,0),
+        legend.justification = c(1, 0),
+        legend.direction = 'horizontal')
+p_clust_num_cnv <- shift_legend(p_clust_num_cnv)
+ggsave( filename = 'plot/clust_num_cnv.pdf', plot = p_clust_num_cnv, device = 'pdf', width = 6, height = 6 )
+ggsave( filename = 'plot/clust_num_cnv.png', plot = p_clust_num_cnv, device = 'png', width = 6, height = 6 )
+p_clust_num_cnv
+```
+
+```{r clust_num_cnerr}
+df_clust_cn2_seqz <- df_clust %>% 
+  dplyr::filter( n_clust_inf > 0, cn_tool == 'seqz', cn_filter == 'cn2' ) %>%
+  inner_join( df_rep, by = 'id_rep' )
+p_clust_num_cnerr <- df_clust_cn2_seqz %>% 
+  dplyr::filter( n_clust_inf <= 700 ) %>%
+  ggplot( aes(x = log10(seqz_mse), y = n_clust_inf - n_clust_true) ) +
+  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = FALSE) +
+  scale_fill_gradient( low = 'white', high = 'red' ) +
+  geom_hline(aes( yintercept = 0), color = "blue", size = .5 ) +
+  geom_smooth( se = FALSE, color = 'green3', size = .5 ) +
+  geom_point( size = .1 ) +
+  scale_x_continuous( breaks = seq(-6, 0, length.out = 5), 
+                      labels = sprintf('%.2g', 10^(seq(log10(1e-6), log10(1), length.out = 5))) ) +
+  #scale_x_continuous( trans = scales::pseudo_log_trans(base = 10), breaks = scales::trans_breaks('log10', function(x) 10^x) ) +
+  facet_wrap( ~cd_tool, nrow = 4, scales = 'free_y' ) +
+  labs( x = 'CN inference error', y = 'clone number error' ) +
+  theme_minimal() +
+  theme(legend.position = c(1,0),
+        legend.justification = c(1, 0),
+        legend.direction = 'horizontal')
+p_clust_num_cnerr <- shift_legend(p_clust_num_cnerr)
+ggsave( filename = 'plot/clust_num_cnerr.pdf', plot = p_clust_num_cnerr, device = 'pdf', width = 6, height = 6 )
+ggsave( filename = 'plot/clust_num_cnerr.png', plot = p_clust_num_cnerr, device = 'png', width = 6, height = 6 )
+p_clust_num_cnerr
+```
+
+#### Clustering metrics (ARI, V-measure)
+
+Important clustering accuracy measures are the Adjusted Rand Index (ARI) and the V-measure, which is composed of homogeneity and completeness.
+
+Let's calculate the correlation between clustering performance scores and their influencing variables.
 
 ```{r clust_cor}
 df_clust_cn2_seqz <- df_clust %>% 
   dplyr::filter( n_clust_inf > 0, cn_tool == 'seqz', cn_filter == 'cn2' ) %>%
-  unite( 'lbl', cn_filter, cn_tool, sep = '\n', remove = F )
+  unite( 'lbl', cn_filter, cn_tool, sep = '\n', remove = F ) %>% 
+  inner_join( df_rep, by = 'id_rep' )
 
 df_clust_cor <- df_clust_cn2_seqz %>%
-  inner_join( df_rep, by = 'id_rep' ) %>%
-  inner_join( df_seqz_cn2_rep, by = c('id_rep_short'='id_rep')) %>% 
   rename( n_clone_inf = n_clust_inf, n_clone_true = n_clust_true ) %>% 
   group_by( cd_tool ) %>% 
   cor_test( 
     vars  = c('ARI', 'V_measure'), 
-    vars2 = c('n_clone_true', 'n_samples', 'purity', 'n_snvs', 'depth', 'cnv_burden') ) %>% 
+    vars2 = c('n_clone_true', 'n_samples', 'purity', 'n_snvs', 'depth', 'cnv_burden', 'seqz_mse') ) %>% 
   adjust_pvalue() %>% 
   add_significance(p.col = 'p.adj', cutpoints = psig_cut, symbols = psig_sym ) %>% 
   mutate( cor_sig = sprintf('%.2f (%s)', cor, p.adj.signif) ) %>% 
@@ -455,153 +640,6 @@ df_clust_cor <- df_clust_cn2_seqz %>%
 df_clust_cor %>% write_csv( 'df_clust_cor.csv' )
 df_clust_cor
 ```
-
-
-```{r clust_num_nclones}
-df_clust_cn2_seqz <- df_clust %>% 
-  dplyr::filter( n_clust_inf > 0, cn_tool == 'seqz', cn_filter == 'cn2' ) %>%
-  unite( 'lbl', cn_filter, cn_tool, sep = '\n', remove = F )
-p_nclust <- df_clust_cn2_seqz %>% 
-  ggplot( aes(x = as.factor(n_clust_true), y = n_clust_inf-n_clust_true) ) +
-  geom_violin() + geom_boxplot( width = .1 ) +
-  #geom_label( data = df_clust_cn2_seqz %>% group_by(cd_tool) %>% summarise(r2 = cor(n_clust_true, n_clust_inf, method = "pearson"), y_max = max(n_clust_inf)), aes(x = 1, y = y_max, label = sprintf('r2 = %.2f', r2)), alpha = 0.5, hjust = 'inward', vjust = 'inward' ) +
-  geom_hline(aes( yintercept = 0), color = "blue", size = 1 ) +
-  facet_wrap( ~cd_tool, nrow = 2, scales = 'free' ) +
-  labs( x = 'simulated no. clones', y = 'clone number error' ) +
-  #ggtitle( 'Difference inferred number of clusters to truth' ) +
-  theme_minimal()
-ggsave( filename = 'plot/clust_num_nclones.pdf', plot = p_nclust, device = 'pdf', width = 8, height = 3 )
-ggsave( filename = 'plot/clust_num_nclones.png', plot = p_nclust, device = 'png', width = 8, height = 3 )
-p_nclust
-```
-
-```{r clust_num_nsamples}
-df_clust_cn2_seqz <- df_clust %>% 
-  dplyr::filter( n_clust_inf > 0, cn_tool == 'seqz', cn_filter == 'cn2' ) %>%
-  unite( 'lbl', cn_filter, cn_tool, sep = '\n', remove = F )
-p_nclust <- df_clust_cn2_seqz %>% 
-  inner_join( df_rep, by = 'id_rep' ) %>% 
-  ggplot( aes(x = as.factor(n_samples), y = n_clust_inf - n_clust_true) ) +
-  geom_violin() + geom_boxplot( width = .1 ) +
-  geom_hline(aes( yintercept = 0), color = "blue", size = 1 ) +
-  facet_wrap( ~cd_tool, nrow = 2, scales = 'free' ) +
-  labs( x = 'number of samples', y = 'clone number error' ) +
-  #ggtitle( 'Difference inferred number of clusters to truth' ) +
-  theme_minimal()
-ggsave( filename = 'plot/clust_num_nsamples.pdf', plot = p_nclust, device = 'pdf', width = 8, height = 3 )
-ggsave( filename = 'plot/clust_num_nsamples.png', plot = p_nclust, device = 'png', width = 8, height = 3 )
-p_nclust
-```
-
-```{r clust_num_purity}
-df_clust_cn2_seqz <- df_clust %>% 
-  dplyr::filter( n_clust_inf > 0, cn_tool == 'seqz', cn_filter == 'cn2' ) %>%
-  unite( 'lbl', cn_filter, cn_tool, sep = '\n', remove = F )
-p_nclust_purity <- df_clust_cn2_seqz %>% 
-  inner_join( df_rep, by = 'id_rep' ) %>% 
-  ggplot( aes(x = purity, y = n_clust_inf - n_clust_true) ) +
-  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = FALSE) +
-  #scale_fill_distiller(palette= "Spectral", direction=1) +
-  scale_fill_gradient( low = 'white', high = 'red' ) +
-  geom_hline(aes( yintercept = 0), color = 'blue', size = .5 ) +
-  geom_smooth( se = FALSE, color = 'green3', size = .5 ) +
-  geom_point( size = .1 ) +
-  facet_wrap( ~cd_tool, nrow = 2, scales = 'free' ) +
-  labs( x = 'tumor purity', y = 'clone number error' ) +
-  theme_minimal() +
-  theme( axis.text = element_text(size = 6) )
-ggsave( filename = 'plot/clust_num_purity.pdf', plot = p_nclust_purity, device = 'pdf', width = 8, height = 3 )
-ggsave( filename = 'plot/clust_num_purity.png', plot = p_nclust_purity, device = 'png', width = 8, height = 3 )
-p_nclust_purity
-```
-
-```{r clust_num_nsnvs}
-df_clust_cn2_seqz <- df_clust %>% 
-  dplyr::filter( n_clust_inf > 0, cn_tool == 'seqz', cn_filter == 'cn2' ) %>%
-  unite( 'lbl', cn_filter, cn_tool, sep = '\n', remove = F )
-p_nclust_nsnvs <- df_clust_cn2_seqz %>% 
-  inner_join( df_rep, by = 'id_rep' ) %>% 
-  ggplot( aes(x = n_snvs, y = n_clust_inf - n_clust_true) ) +
-  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = FALSE) +
-  scale_fill_gradient( low = 'white', high = 'red' ) +
-  geom_hline(aes( yintercept = 0), color = "blue", size = .5 ) +
-  geom_smooth( se = FALSE, color = 'green3', size = .5 ) +
-  geom_point( size = .1 ) +
-  #geom_violin() + geom_boxplot( width = .1 ) +
-  facet_wrap( ~cd_tool, nrow = 2, scales = 'free' ) +
-  labs( x = 'number of SNVs', y = 'clone number error' ) +
-  #ggtitle( 'Difference inferred number of clusters to truth' ) + 
-  theme_minimal() +
-  theme( axis.text = element_text(size = 6) )
-ggsave( filename = 'plot/clust_num_nsnvs.pdf', plot = p_nclust_nsnvs, device = 'pdf', width = 8, height = 3 )
-ggsave( filename = 'plot/clust_num_nsnvs.png', plot = p_nclust_nsnvs, device = 'png', width = 8, height = 3 )
-p_nclust_nsnvs
-```
-
-```{r clust_num_depth}
-df_clust_cn2_seqz <- df_clust %>% 
-  dplyr::filter( n_clust_inf > 0, cn_tool == 'seqz', cn_filter == 'cn2' ) %>%
-  unite( 'lbl', cn_filter, cn_tool, sep = '\n', remove = F )
-p_clust_num_depth <- df_clust_cn2_seqz %>% 
-  inner_join( df_rep, by = 'id_rep' ) %>% 
-  ggplot( aes(x = as.factor(depth), y = n_clust_inf - n_clust_true) ) +
-  geom_violin() + geom_boxplot( width = .1 ) +
-  geom_hline(aes( yintercept = 0), color = "blue", size = 1 ) +
-  facet_wrap( ~cd_tool, nrow = 2, scales = 'free' ) +
-  labs( x = 'sequencing depth', y = 'clone number error' ) +
-  #ggtitle( 'Difference inferred number of clusters to truth' ) +
-  theme_minimal()
-ggsave( filename = 'plot/clust_num_depth.pdf', plot = p_clust_num_depth, device = 'pdf', width = 8, height = 3 )
-ggsave( filename = 'plot/clust_num_depth.png', plot = p_clust_num_depth, device = 'png', width = 8, height = 3 )
-p_clust_num_depth
-```
-
-```{r clust_num_cnv}
-df_clust_cn2_seqz <- df_clust %>% 
-  dplyr::filter( n_clust_inf > 0, cn_tool == 'seqz', cn_filter == 'cn2' ) %>%
-  unite( 'lbl', cn_filter, cn_tool, sep = '\n', remove = F )
-p_clust_num_cnv <- df_clust_cn2_seqz %>% 
-  inner_join( df_rep, by = 'id_rep' ) %>% 
-  ggplot( aes(x = cnv_burden, y = n_clust_inf - n_clust_true) ) +
-  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = FALSE) +
-  scale_fill_gradient( low = 'white', high = 'red' ) +
-  geom_hline(aes( yintercept = 0), color = "blue", size = .5 ) +
-  geom_smooth( se = FALSE, color = 'green3', size = .5 ) +
-  geom_point( size = .1 ) +
-  facet_wrap( ~cd_tool, nrow = 2, scales = 'free_y' ) +
-  labs( x = 'CNV burden', y = 'clone number error' ) +
-  #ggtitle( 'Difference inferred number of clusters to truth' ) +
-  theme_minimal()
-ggsave( filename = 'plot/clust_num_cnv.pdf', plot = p_clust_num_cnv, device = 'pdf', width = 8, height = 3 )
-ggsave( filename = 'plot/clust_num_cnv.png', plot = p_clust_num_cnv, device = 'png', width = 8, height = 3 )
-p_clust_num_cnv
-```
-
-```{r clust_num_cnerr}
-df_clust_cn2_seqz <- df_clust %>% 
-  dplyr::filter( n_clust_inf > 0, cn_tool == 'seqz', cn_filter == 'cn2' ) %>%
-  unite( 'lbl', cn_filter, cn_tool, sep = '\n', remove = F )
-p_clust_num_cnerr <- df_clust_cn2_seqz %>% 
-  inner_join( df_rep, by = 'id_rep' ) %>% 
-  ggplot( aes(x = seqz_mse, y = n_clust_inf - n_clust_true) ) +
-  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = FALSE) +
-  scale_fill_gradient( low = 'white', high = 'red' ) +
-  geom_hline(aes( yintercept = 0), color = "blue", size = .5 ) +
-  geom_smooth( se = FALSE, color = 'green3', size = .5 ) +
-  geom_point( size = .1 ) +
-  #scale_x_continuous( trans = scales::pseudo_log_trans(base = 10), breaks = scales::trans_breaks('log10', function(x) 10^x) ) +
-  facet_wrap( ~cd_tool, nrow = 2, scales = 'free_y' ) +
-  labs( x = 'CN inference error', y = 'clone number error' ) +
-  #ggtitle( 'Difference inferred number of clusters to truth' ) +
-  theme_minimal()
-ggsave( filename = 'plot/clust_num_cnerr.pdf', plot = p_clust_num_cnerr, device = 'pdf', width = 8, height = 3 )
-ggsave( filename = 'plot/clust_num_cnerr.png', plot = p_clust_num_cnerr, device = 'png', width = 8, height = 3 )
-p_clust_num_cnerr
-```
-
-#### Clustering metrics (ARI, V-measure)
-
-Important clustering accuracy measures are the Adjusted Rand Index (ARI) and the V-measure, which is composed of homogeneity and completeness.
 
 ```{r, clust_metrics, warning=F}
 # reorder callers by overall ARI score
@@ -612,73 +650,89 @@ pairs <- cbind(head(levels(df$lbl), -1), levels(df$lbl)[-1]) %>%
 gwc_ari_wilcox <- df %>%
     wilcox_test( ., ARI ~ lbl, comparisons = pairs ) %>%
     adjust_pvalue( method = 'bonferroni' ) %>%
-    add_significance( p.col = 'p.adj', output.col = 'sig_sym' ) %>%
+    add_significance( p.col = 'p.adj', output.col = 'sig_sym', cutpoints = psig_cut, symbols = psig_sym ) %>%
     add_xy_position( x = 'caller', step.increase = 0 ) %>%
     mutate( y.position = y.position + 0.05 )
 gwc_v_wilcox <- df %>%
     wilcox_test( ., V_measure ~ lbl, comparisons = pairs ) %>%
     adjust_pvalue( method = 'bonferroni' ) %>%
-    add_significance( p.col = 'p.adj', output.col = 'sig_sym' ) %>%
+    add_significance( p.col = 'p.adj', output.col = 'sig_sym', cutpoints = psig_cut, symbols = psig_sym ) %>%
     add_xy_position( x = 'caller', step.increase = 0 ) %>%
     mutate( y.position = y.position + 0.05 )
-gwc_comp_wilcox <- df %>%
-    wilcox_test( ., completeness ~ lbl, comparisons = pairs ) %>%
-    adjust_pvalue( method = 'bonferroni' ) %>%
-    add_significance( p.col = 'p.adj', output.col = 'sig_sym' ) %>%
-    add_xy_position( x = 'caller', step.increase = 0 ) %>%
-    mutate( y.position = y.position + 0.05 )
-gwc_homog_wilcox <- df %>%
-    wilcox_test( ., homogeneity ~ lbl, comparisons = pairs ) %>%
-    adjust_pvalue( method = 'bonferroni' ) %>%
-    add_significance( p.col = 'p.adj', output.col = 'sig_sym' ) %>%
-    add_xy_position( x = 'caller', step.increase = 0 ) %>%
-    mutate( y.position = y.position + 0.05 )
+# gwc_comp_wilcox <- df %>%
+#     wilcox_test( ., completeness ~ lbl, comparisons = pairs ) %>%
+#     adjust_pvalue( method = 'bonferroni' ) %>%
+#     add_significance( p.col = 'p.adj', output.col = 'sig_sym', cutpoints = psig_cut, symbols = psig_sym ) %>%
+#     add_xy_position( x = 'caller', step.increase = 0 ) %>%
+#     mutate( y.position = y.position + 0.05 )
+# gwc_homog_wilcox <- df %>%
+#     wilcox_test( ., homogeneity ~ lbl, comparisons = pairs ) %>%
+#     adjust_pvalue( method = 'bonferroni' ) %>%
+#     add_significance( p.col = 'p.adj', output.col = 'sig_sym', cutpoints = psig_cut, symbols = psig_sym ) %>%
+#     add_xy_position( x = 'caller', step.increase = 0 ) %>%
+#     mutate( y.position = y.position + 0.05 )
 
 
 p_ari <- df %>% 
   dplyr::filter( n_clust_inf > 0 ) %>%
   pivot_longer( cols = ARI, names_to = 'metric' ) %>%
+  mutate( metric = factor(metric, levels = c('ARI', 'V-measure', 'completeness', 'homogeneity'))) %>% 
   ggplot( aes(x = lbl, y = value) ) +
-  geom_boxplot() +
-  stat_pvalue_manual( data = gwc_ari_wilcox, label = 'p.adj.signif', tip.length = .01, size = 2 ) +
-  #geom_violin() + geom_sina() +
-  facet_wrap( ~ metric, nrow = 1 ) +
-  labs( x = '' ) + 
+  geom_boxplot( aes(fill = metric) ) +
+  scale_fill_manual( values = cbPalette[1], guide = FALSE) +
+  stat_pvalue_manual( data = gwc_ari_wilcox, label = 'sig_sym', tip.length = .01, size = 4 ) +
+  #facet_wrap( ~ metric, nrow = 1 ) +
+  labs( x = '' ) + ggtitle( 'ARI' ) +
   theme_minimal() +
   theme( axis.text.x = element_text(angle = 45, hjust=1) )
 p_vmeasure <- df %>% 
   dplyr::filter( n_clust_inf > 0 ) %>%
   pivot_longer( cols = V_measure, names_to = 'metric' ) %>%
   ggplot( aes(x = lbl, y = value) ) +
-  geom_boxplot() +
-  stat_pvalue_manual( data = gwc_v_wilcox, label = 'p.adj.signif', tip.length = .01, size = 2 ) +
-  #geom_violin() + geom_sina() +
-  facet_wrap( ~ metric, nrow = 1 ) +
-  labs( x = '' ) + 
+  geom_boxplot( aes(fill = metric ) ) +
+  scale_fill_manual( values = cbPalette[2], guide = FALSE ) +
+  stat_pvalue_manual( data = gwc_v_wilcox, label = 'sig_sym', tip.length = .01, size = 4 ) +
+  #facet_wrap( ~ metric, nrow = 1 ) +
+  labs( x = '' ) + ggtitle( 'V-measure' ) +
   theme_minimal() +
   theme( axis.text.x = element_text(angle = 45, hjust=1) )
-p_comp <- df %>% 
+# p_comp <- df %>% 
+#   dplyr::filter( n_clust_inf > 0 ) %>%
+#   pivot_longer( cols = completeness, names_to = 'metric' ) %>%
+#   ggplot( aes(x = lbl, y = value) ) +
+#   geom_boxplot() +
+#   stat_pvalue_manual( data = gwc_comp_wilcox, label = 'sig_sym', tip.length = .01, size = 4 ) +
+#   facet_wrap( ~ metric, nrow = 1 ) +
+#   labs( x = '' ) + 
+#   theme_minimal() +
+#   theme( axis.text.x = element_text(angle = 45, hjust=1) )
+# p_homog <- df %>% 
+#   dplyr::filter( n_clust_inf > 0 ) %>%
+#   pivot_longer( cols = homogeneity, names_to = 'metric' ) %>%
+#   ggplot( aes(x = lbl, y = value) ) +
+#   geom_boxplot() +
+#   stat_pvalue_manual( data = gwc_homog_wilcox, label = 'sig_sym', tip.length = .01, size = 4 ) +
+#   facet_wrap( ~ metric, nrow = 1 ) +
+#   labs( x = '' ) + 
+#   theme_minimal() +
+#   theme( axis.text.x = element_text(angle = 45, hjust=1) )
+
+p_comhom <- df %>% 
   dplyr::filter( n_clust_inf > 0 ) %>%
-  pivot_longer( cols = completeness, names_to = 'metric' ) %>%
+  pivot_longer( cols = c('completeness', 'homogeneity'), names_to = 'metric' ) %>%
+  mutate( metric = factor(metric, levels = c('ARI', 'V-measure', 'completeness', 'homogeneity'))) %>% 
   ggplot( aes(x = lbl, y = value) ) +
-  geom_boxplot() +
-  stat_pvalue_manual( data = gwc_comp_wilcox, label = 'p.adj.signif', tip.length = .01, size = 2 ) +
-  #geom_violin() + geom_sina() +
-  facet_wrap( ~ metric, nrow = 1 ) +
+  geom_boxplot( aes(fill = metric) ) +
+  #scale_fill_manual( values = cbPalette[3:4] ) +
+  scale_fill_manual( values = cbPalette, drop = FALSE,
+                     name = 'metric',
+                     breaks = c('ARI', 'V-measure', 'completeness', 'homogeneity')) +
+  #facet_wrap( ~ metric, nrow = 1 ) +
+  ggtitle( 'completeness / homogeneity' ) +
   labs( x = '' ) + 
   theme_minimal() +
   theme( axis.text.x = element_text(angle = 45, hjust=1) )
-p_homog <- df %>% 
-  dplyr::filter( n_clust_inf > 0 ) %>%
-  pivot_longer( cols = homogeneity, names_to = 'metric' ) %>%
-  ggplot( aes(x = lbl, y = value) ) +
-  geom_boxplot() +
-  stat_pvalue_manual( data = gwc_homog_wilcox, label = 'p.adj.signif', tip.length = .01, size = 2 ) +
-  #geom_violin() + geom_sina() +
-  facet_wrap( ~ metric, nrow = 1 ) +
-  labs( x = '' ) + 
-  theme_minimal() +
-  theme( axis.text.x = element_text(angle = 45, hjust=1) )
+
 
 # p_clust_scores <- df %>% 
 #   dplyr::filter( n_clust_inf > 0 ) %>%
@@ -692,17 +746,30 @@ p_homog <- df %>%
 #   theme_minimal() +
 #   theme( axis.text.x = element_text(angle = 45, hjust=1) )
 
-p_clust_scores <- ggarrange(
-    p_ari, p_vmeasure, p_comp, p_homog,
-    ncol = 4,
-    nrow = 1,
-    labels = "auto" , 
-    common.legend = TRUE, 
-    legend = "top"
-  )
+# p_clust_scores <- ggarrange(
+#     p_ari, p_vmeasure, p_comp, p_homog,
+#     ncol = 2,
+#     nrow = 2,
+#     labels = "auto" , 
+#     common.legend = TRUE, 
+#     legend = "top",
+#   )
 
-ggsave( filename = 'plot/clust_metrics.pdf', plot = p_clust_scores, device = 'pdf', width = 8, height = 3 )
-ggsave( filename = 'plot/clust_metrics.png', plot = p_clust_scores, device = 'png', width = 8, height = 3 )
+p_clust_scores <- ggarrange(
+    ggarrange(
+      p_ari, p_vmeasure,
+      ncol = 2,
+      nrow = 1,
+      labels = c('a', 'b')
+    ),
+    p_comhom,
+    nrow = 2,
+    labels = c('', 'c'), 
+    common.legend = FALSE, 
+    legend = 'bottom' )
+
+ggsave( filename = 'plot/clust_metrics.pdf', plot = p_clust_scores, device = 'pdf', width = 6, height = 6 )
+ggsave( filename = 'plot/clust_metrics.png', plot = p_clust_scores, device = 'png', width = 6, height = 6 )
 p_clust_scores
 ```
 
@@ -710,23 +777,28 @@ p_clust_scores
 
 ```{r, clust_metrics_nclones, warning=F}
 # reorder callers by overall ARI score
-df <- df_clust_cn2_seqz %>% mutate( lbl = fct_reorder(cd_tool, -ARI, .fun = median, na.rm = T) ) 
+df <- df_clust %>% 
+  dplyr::filter( n_clust_inf > 0, cn_tool == 'seqz', cn_filter == 'cn2' ) %>%
+  inner_join( df_rep, by = 'id_rep' ) %>% 
+  mutate( lbl = fct_reorder(cd_tool, -ARI, .fun = median, na.rm = T) ) 
 
 p_clust_scores_nclones <- df %>%
   dplyr::filter( n_clust_inf > 0 ) %>%
-  inner_join( df_rep, by = 'id_rep' ) %>% 
   pivot_longer( c('ARI', 'V_measure'), names_to = 'metric', values_to = 'value') %>%
-  ggplot( aes(x = as.factor(n_clones), y = value, fill = metric) ) +
+  ggplot( aes(x = as.factor(n_clust_true), y = value, fill = metric) ) +
   geom_boxplot() +
-  scale_fill_brewer( palette = 'Set1' ) +
-  facet_wrap( ~ lbl, nrow = 2 ) +
-  labs( x = 'simulated number of clones', y = '' ) + 
+  scale_fill_manual( values = cbPalette ) +
+  facet_wrap( ~ lbl, nrow = 4 ) +
+  labs( x = 'simulated number of clones', y = 'genotype accuracy' ) + 
   theme_minimal() +
-  theme( axis.text.x = element_text(angle = 45, hjust=1),
-         legend.position = 'top' )
+  theme(axis.text.x = element_text(angle = 45, hjust=1),
+        legend.position = c(1,0),
+        legend.justification = c(1, 0),
+        legend.direction = 'horizontal')
+p_clust_scores_nclones <- shift_legend(p_clust_scores_nclones)
 
-ggsave( filename = 'plot/clust_metrics_nclones.pdf', plot = p_clust_scores_nclones, device = 'pdf', width = 8, height = 6 )
-ggsave( filename = 'plot/clust_metrics_nclones.png', plot = p_clust_scores_nclones, device = 'png', width = 8, height = 6 )
+ggsave( filename = 'plot/clust_metrics_nclones.pdf', plot = p_clust_scores_nclones, device = 'pdf', width = 6, height = 6 )
+ggsave( filename = 'plot/clust_metrics_nclones.png', plot = p_clust_scores_nclones, device = 'png', width = 6, height = 6 )
 p_clust_scores_nclones
 ```
 
@@ -734,56 +806,65 @@ p_clust_scores_nclones
 
 ```{r, clust_metrics_nsamples, warning=F}
 # reorder callers by overall ARI score
-df <- df_clust_cn2_seqz %>% mutate( lbl = fct_reorder(cd_tool, -ARI, .fun = median, na.rm = T) ) 
+df <- df_clust %>% 
+  dplyr::filter( n_clust_inf > 0, cn_tool == 'seqz', cn_filter == 'cn2' ) %>%
+  inner_join( df_rep, by = 'id_rep' ) %>% 
+  mutate( lbl = fct_reorder(cd_tool, -ARI, .fun = median, na.rm = T) ) 
 
 p_clust_scores_nsamples <- df %>%
-  dplyr::filter( n_clust_inf > 0 ) %>%
-  inner_join( df_rep, by = 'id_rep' ) %>% 
   pivot_longer( c('ARI', 'V_measure'), names_to = 'metric', values_to = 'value') %>%
   ggplot( aes(x = as.factor(n_samples), y = value, fill = metric) ) +
   geom_boxplot() +
-  scale_fill_brewer( palette = 'Set1' ) +
-  facet_wrap( ~ lbl, nrow = 2 ) +
-  labs( x = 'number of samples', y = '' ) + 
+  scale_fill_manual( values = cbPalette ) +
+  facet_wrap( ~ lbl, nrow = 4 ) +
+  labs( x = 'number of samples', y = 'genotype accuracy' ) + 
   theme_minimal() +
-  theme( axis.text.x = element_text(angle = 45, hjust=1),
-         legend.position = 'top' )
+  theme(axis.text.x = element_text(angle = 45, hjust=1),
+        legend.position = c(1,0),
+        legend.justification = c(1, 0),
+        legend.direction = 'horizontal')
+p_clust_scores_nsamples <- shift_legend(p_clust_scores_nsamples)
 
-ggsave( filename = 'plot/clust_metrics_nsamples.pdf', plot = p_clust_scores_nsamples, device = 'pdf', width = 8, height = 6 )
-ggsave( filename = 'plot/clust_metrics_nsamples.png', plot = p_clust_scores_nsamples, device = 'png', width = 8, height = 6 )
+ggsave( filename = 'plot/clust_metrics_nsamples.pdf', plot = p_clust_scores_nsamples, device = 'pdf', width = 6, height = 6 )
+ggsave( filename = 'plot/clust_metrics_nsamples.png', plot = p_clust_scores_nsamples, device = 'png', width = 6, height = 6 )
 p_clust_scores_nsamples
 ```
 
 ```{r clust_metrics_purity}
 # reorder callers by overall ARI score
-df <- df_clust_cn2_seqz %>% mutate( cd_tool = fct_reorder(cd_tool, -ARI, .fun = median, na.rm = T) ) 
+df <- df_clust %>% 
+  dplyr::filter( n_clust_inf > 0, cn_tool == 'seqz', cn_filter == 'cn2' ) %>%
+  inner_join( df_rep, by = 'id_rep' ) %>% 
+  mutate( lbl = fct_reorder(cd_tool, -ARI, .fun = median, na.rm = T) ) 
 
 p_clust_scores_purity <- df %>%
-  dplyr::filter( n_clust_inf > 0 ) %>%
-  inner_join( df_rep, by = 'id_rep' ) %>% 
   pivot_longer( c('ARI', 'V_measure'), names_to = 'metric', values_to = 'value') %>%
   ggplot( aes(x = purity, y = value) ) +
   stat_density_2d(aes(fill = ..density..), geom = "raster", contour = FALSE) +
   scale_fill_gradient( low = 'white', high = 'red', limits = c(0, 10) ) +
   geom_point( size = .1 ) +
   geom_smooth( method = 'loess', se = FALSE, color = 'green3', size = .5 ) +
-  facet_grid( metric~cd_tool ) +
-  labs( x = 'tumor purity', y = '' ) +
+  facet_nested_wrap( ~ lbl + metric, nrow = 4 ) +
+  labs( x = 'tumor purity', y = 'genotype accuracy' ) +
   #ggtitle( 'Difference inferred number of clusters to truth' ) + 
   theme_minimal() +
-  theme( axis.text = element_text(size = 6) )
-ggsave( filename = 'plot/clust_metrics_purity.pdf', plot = p_clust_scores_purity, device = 'pdf', width = 8, height = 3 )
-ggsave( filename = 'plot/clust_metrics_purity.png', plot = p_clust_scores_purity, device = 'png', width = 8, height = 3 )
+  theme(legend.position = c(1,0),
+        legend.justification = c(1, 0),
+        legend.direction = 'horizontal')
+p_clust_scores_purity <- shift_legend(p_clust_scores_purity)
+ggsave( filename = 'plot/clust_metrics_purity.pdf', plot = p_clust_scores_purity, device = 'pdf', width = 6, height = 6 )
+ggsave( filename = 'plot/clust_metrics_purity.png', plot = p_clust_scores_purity, device = 'png', width = 6, height = 6 )
 p_clust_scores_purity
 ```
 
 ```{r clust_metrics_nsnvs}
 # reorder callers by overall ARI score
-df <- df_clust_cn2_seqz %>% mutate( cd_tool = fct_reorder(cd_tool, -ARI, .fun = median, na.rm = T) ) 
+df <- df_clust %>% 
+  dplyr::filter( n_clust_inf > 0, cn_tool == 'seqz', cn_filter == 'cn2' ) %>%
+  inner_join( df_rep, by = 'id_rep' ) %>% 
+  mutate( lbl = fct_reorder(cd_tool, -ARI, .fun = median, na.rm = T) ) 
 
 p_clust_scores_nsnvs <- df %>%
-  dplyr::filter( n_clust_inf > 0 ) %>%
-  inner_join( df_rep, by = 'id_rep' ) %>% 
   pivot_longer( c('ARI', 'V_measure'), names_to = 'metric', values_to = 'value') %>%
   ggplot( aes(x = n_snvs, y = value) ) +
   stat_density_2d(aes(fill = ..density..), geom = "raster", contour = FALSE) +
@@ -791,59 +872,93 @@ p_clust_scores_nsnvs <- df %>%
   geom_point( size = .1 ) +
   geom_smooth( method = 'loess', se = FALSE, color = 'green3', size = .5 ) +
   scale_x_continuous( labels = scientific, breaks = pretty_breaks(n = 3) ) +
-  facet_grid( metric~cd_tool ) +
-  labs( x = 'number of SNVs', y = '' ) +
-  #ggtitle( 'Difference inferred number of clusters to truth' ) + 
+  facet_nested_wrap( ~ lbl + metric, nrow = 4 ) +
+  labs( x = 'number of SNVs', y = 'genotype accuracy' ) +
   theme_minimal() +
   theme( 
-    axis.text.x = element_text(size = 6, angle = 30, hjust = 1),
-    axis.text.y = element_text(size = 6))
-ggsave( filename = 'plot/clust_metrics_nsnvs.pdf', plot = p_clust_scores_nsnvs, device = 'pdf', width = 8, height = 3 )
-ggsave( filename = 'plot/clust_metrics_nsnvs.png', plot = p_clust_scores_nsnvs, device = 'png', width = 8, height = 3 )
+    axis.text = element_text(size = 6),
+    legend.position = c(1,0),
+        legend.justification = c(1, 0))
+p_clust_scores_nsnvs <- shift_legend(p_clust_scores_nsnvs)
+ggsave( filename = 'plot/clust_metrics_nsnvs.pdf', plot = p_clust_scores_nsnvs, device = 'pdf', width = 6, height = 6 )
+ggsave( filename = 'plot/clust_metrics_nsnvs.png', plot = p_clust_scores_nsnvs, device = 'png', width = 6, height = 6 )
 p_clust_scores_nsnvs
 ```
 
 ```{r, clust_metrics_depth, warning=F}
 # reorder callers by overall ARI score
-df <- df_clust_cn2_seqz %>% mutate( lbl = fct_reorder(cd_tool, -ARI, .fun = median, na.rm = T) ) 
+df <- df_clust %>% 
+  dplyr::filter( n_clust_inf > 0, cn_tool == 'seqz', cn_filter == 'cn2' ) %>%
+  inner_join( df_rep, by = 'id_rep' ) %>% 
+  mutate( lbl = fct_reorder(cd_tool, -ARI, .fun = median, na.rm = T) ) 
 
 p_clust_scores_depth <- df %>%
-  dplyr::filter( n_clust_inf > 0 ) %>%
-  inner_join( df_rep, by = 'id_rep' ) %>% 
   pivot_longer( c('ARI', 'V_measure'), names_to = 'metric', values_to = 'value') %>%
   ggplot( aes(x = as.factor(depth), y = value, fill = metric) ) +
   geom_boxplot() +
-  scale_fill_brewer( palette = 'Set1' ) +
+  scale_fill_manual( values = cbPalette ) +
   facet_wrap( ~ lbl, nrow = 2 ) +
-  labs( x = 'sequencing depth', y = '' ) + 
+  labs( x = 'sequencing depth', y = 'genotype accuracy' ) + 
   theme_minimal() +
-  theme( axis.text.x = element_text(angle = 45, hjust=1),
-         legend.position = 'top' )
-
+  theme( legend.position = c(1,0),
+         legend.justification = c(1, 0))
+p_clust_scores_depth <- shift_legend(p_clust_scores_depth)
 ggsave( filename = 'plot/clust_metrics_depth.pdf', plot = p_clust_scores_depth, device = 'pdf', width = 8, height = 6 )
 ggsave( filename = 'plot/clust_metrics_depth.png', plot = p_clust_scores_depth, device = 'png', width = 8, height = 6 )
 p_clust_scores_depth
 ```
 
 ```{r clust_metrics_cnv}
-df <- df_clust_cn2_seqz %>% mutate( cd_tool = fct_reorder(cd_tool, -ARI, .fun = median, na.rm = T) ) 
+df <- df_clust %>% 
+  dplyr::filter( n_clust_inf > 0, cn_tool == 'seqz', cn_filter == 'cn2' ) %>%
+  inner_join( df_rep, by = 'id_rep' ) %>% 
+  mutate( lbl = fct_reorder(cd_tool, -ARI, .fun = median, na.rm = T) )
 
 p_clust_scores_cnv <- df %>%
-  dplyr::filter( n_clust_inf > 0 ) %>%
-  inner_join( df_rep, by = 'id_rep' ) %>% 
   pivot_longer( c('ARI', 'V_measure'), names_to = 'metric', values_to = 'value') %>%
   ggplot( aes(x = cnv_burden, y = value) ) +
   stat_density_2d(aes(fill = ..density..), geom = "raster", contour = FALSE) +
   scale_fill_gradient( low = 'white', high = 'red', limits = c(0, 10) ) +
   geom_point( size = .1 ) +
   geom_smooth( se = FALSE, color = 'green3', size = .5 ) +
-  facet_grid( metric~cd_tool, scales = 'free_y' ) +
-  labs( x = 'CNV burden', y = 'clone number error' ) +
-  #ggtitle( 'Difference inferred number of clusters to truth' ) +
-  theme_minimal()
-ggsave( filename = 'plot/clust_metrics_cnv.pdf', plot = p_clust_scores_cnv, device = 'pdf', width = 8, height = 3 )
-ggsave( filename = 'plot/clust_metrics_cnv.png', plot = p_clust_scores_cnv, device = 'png', width = 8, height = 3 )
+  facet_nested_wrap( ~ lbl + metric, nrow = 4 ) +
+  labs( x = 'CNV burden', y = 'genotype accuracy' ) +
+  theme_minimal() +
+  theme( legend.position = c(1,0),
+         legend.justification = c(1, 0),
+        legend.direction = 'horizontal')
+p_clust_scores_cnv <- shift_legend(p_clust_scores_cnv)
+ggsave( filename = 'plot/clust_metrics_cnv.pdf', plot = p_clust_scores_cnv, device = 'pdf', width = 6, height = 6 )
+ggsave( filename = 'plot/clust_metrics_cnv.png', plot = p_clust_scores_cnv, device = 'png', width = 6, height = 6 )
 p_clust_scores_cnv
+```
+
+```{r clust_metrics_cnerr}
+df <- df_clust %>% 
+  dplyr::filter( n_clust_inf > 0, cn_tool == 'seqz', cn_filter == 'cn2' ) %>%
+  inner_join( df_rep, by = 'id_rep' ) %>% 
+  mutate( lbl = fct_reorder(cd_tool, -ARI, .fun = median, na.rm = T) )
+
+p_clust_scores_cnerr <- df %>%
+  pivot_longer( c('ARI', 'V_measure'), names_to = 'metric', values_to = 'value') %>%
+  ggplot( aes(x = log10(seqz_mse), y = value) ) +
+  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = FALSE) +
+  scale_fill_gradient( low = 'white', high = 'red', limits = c(0, 1.5) ) +
+  geom_smooth( se = FALSE, color = 'green3', size = .5 ) +
+  geom_point( size = .1 ) +
+  scale_x_continuous( breaks = seq(-6, 0, length.out = 4), 
+                      labels = sprintf('%.2g', 10^(seq(log10(1e-6), log10(1), length.out = 4))) ) +
+  facet_nested_wrap( ~ lbl + metric, nrow = 4 ) +
+  labs( x = 'CN inference error', y = 'genotype accuracy' ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(size = 6),
+        legend.position = c(1,0),
+        legend.justification = c(1, 0),
+        legend.direction = 'horizontal')
+p_clust_scores_cnerr <- shift_legend(p_clust_scores_cnerr)
+ggsave( filename = 'plot/clust_metrics_cnerr.pdf', plot = p_clust_scores_cnerr, device = 'pdf', width = 6, height = 6 )
+ggsave( filename = 'plot/clust_metrics_cnerr.png', plot = p_clust_scores_cnerr, device = 'png', width = 6, height = 6 )
+p_clust_num_cnerr
 ```
 
 ### Cellular prevalence accuracy
@@ -861,7 +976,8 @@ df_prev_cn2_seqz <- df_metr_prev %>%
   unite( 'lbl', cn_filter, cn_tool, sep = '\n', remove = F )
 
 # reorder callers by median MSE
-df <- df_prev_cn2_seqz %>% mutate( cd_tool = fct_reorder(cd_tool, prev_msq, .fun = median, na.rm = T) )
+df <- df_prev_cn2_seqz %>% 
+  mutate( cd_tool = fct_reorder(cd_tool, prev_msq, .fun = median, na.rm = T) )
 
 # perform Wilcoxon rank sum test for difference
 pairs <- cbind(head(levels(df$cd_tool), -1), levels(df$cd_tool)[-1]) %>%
@@ -869,14 +985,14 @@ pairs <- cbind(head(levels(df$cd_tool), -1), levels(df$cd_tool)[-1]) %>%
 gwc_msq_wilcox <- df %>%
     wilcox_test( ., prev_msq ~ cd_tool, comparisons = pairs ) %>%
     adjust_pvalue( method = 'bonferroni' ) %>%
-    add_significance( p.col = 'p.adj', output.col = 'sig_sym' ) %>%
+    add_significance( p.col = 'p.adj', output.col = 'sig_sym', cutpoints = psig_cut, symbols = psig_sym ) %>%
     add_xy_position( x = 'cd_tool', step.increase = 0 ) %>%
     mutate( y.position = y.position + 0.05 )
 
 p_prev_msq <- df %>%
   ggplot( aes(x = cd_tool, y = prev_msq) ) +
   geom_boxplot() +
-  stat_pvalue_manual( data = gwc_msq_wilcox, label = 'p.adj.signif', tip.length = .01, size = 4 ) +
+  stat_pvalue_manual( data = gwc_msq_wilcox, label = 'sig_sym', tip.length = .01, size = 4 ) +
   #geom_violin() + geom_sina() +
   labs( x = '', y = 'Prevalence error') +
   theme_minimal()
@@ -893,17 +1009,18 @@ Do influence factors correlate with prevalence inference error?
 ```{r prev_corr}
 df_prev_cn2_seqz <- df_metr_prev %>% 
   dplyr::filter( n_clust_inf > 0, cn_tool == 'seqz', cn_filter == 'cn2' ) %>%
-  unite( 'lbl', cn_filter, cn_tool, sep = '\n', remove = F )
+  unite( 'lbl', cn_filter, cn_tool, sep = '\n', remove = F ) %>% 
+  inner_join( df_rep, by = 'id_rep' )
 
 df_prev_cor <- df_prev_cn2_seqz %>%
-  inner_join( df_rep, by = 'id_rep' ) %>%
+  rename( prev_mse = prev_msq ) %>% 
   group_by( cd_tool ) %>% 
   cor_test( 
-    vars  = c('prev_msq'), 
-    vars2 = c('n_clust_true', 'n_samples', 'purity', 'n_snvs', 'depth') ) %>% 
+    vars  = c('prev_mse'), 
+    vars2 = c('n_clust_true', 'n_samples', 'purity', 'n_snvs', 'depth', 'cnv_burden', 'seqz_mse') ) %>% 
   adjust_pvalue() %>% 
-  add_significance(p.col = 'p.adj' ) %>% 
-  mutate( cor_sig = sprintf('%.2f (%s)', cor, p.adj.signif) ) %>% 
+  add_significance(p.col = 'p.adj', cutpoints = psig_cut, symbols = psig_sym ) %>% 
+  #mutate( cor_sig = sprintf('%.2f (%s)', cor, p.adj.signif) ) %>% 
   pivot_wider( id_cols = c(cd_tool, var1), names_from = 'var2', values_from = c('cor', 'p.adj.signif') )
   #pivot_wider( id_cols = c(cd_tool, var1), names_from = 'var2', values_from = 'cor_sig' )
 df_prev_cor %>% write_csv( 'df_prev_cor.csv' )
@@ -913,12 +1030,12 @@ df_prev_cor
 ```{r prev_nclones}
 p_prev_nclones <- df_prev_cn2_seqz %>% 
   ggplot( aes(x = as.factor(n_clust_true), y = prev_msq) ) +
-  geom_violin() + geom_boxplot( width = .1 ) +
-  facet_wrap( ~cd_tool, nrow = 2, scales = 'free' ) +
-  labs( x = 'true no. clones', y = 'mean squared error' ) +
+  geom_violin() + geom_boxplot( width = .2 ) +
+  facet_wrap( ~cd_tool, nrow = 4, scales = 'free_y' ) +
+  labs( x = 'simulated no. clones', y = 'prevalence error' ) +
   theme_minimal()
-ggsave( filename = 'plot/prev_nclones.pdf', plot = p_prev_nclones, device = 'pdf', width = 8, height = 3 )
-ggsave( filename = 'plot/prev_nclones.png', plot = p_prev_nclones, device = 'png', width = 8, height = 3 )
+ggsave( filename = 'plot/prev_nclones.pdf', plot = p_prev_nclones, device = 'pdf', width = 6, height = 6 )
+ggsave( filename = 'plot/prev_nclones.png', plot = p_prev_nclones, device = 'png', width = 6, height = 6 )
 p_prev_nclones
 ```
 
@@ -926,55 +1043,114 @@ p_prev_nclones
 p_prev_nsamples <- df_prev_cn2_seqz %>% 
   inner_join( df_rep, by = 'id_rep' ) %>% 
   ggplot( aes(x = as.factor(n_samples), y = prev_msq) ) +
-  geom_violin() + geom_boxplot( width = .1 ) +
-  facet_wrap( ~cd_tool, nrow = 2, scales = 'free' ) +
-  labs( x = 'number of samples', y = 'mean squared error' ) +
+  geom_violin() + geom_boxplot( width = .2 ) +
+  facet_wrap( ~cd_tool, nrow = 4, scales = 'free_y' ) +
+  labs( x = 'number of samples', y = 'prevalence error' ) +
   theme_minimal()
-ggsave( filename = 'plot/prev_nsamples.pdf', plot = p_prev_nsamples, device = 'pdf', width = 8, height = 3 )
-ggsave( filename = 'plot/prev_nsamples.png', plot = p_prev_nsamples, device = 'png', width = 8, height = 3 )
+ggsave( filename = 'plot/prev_nsamples.pdf', plot = p_prev_nsamples, device = 'pdf', width = 6, height = 6 )
+ggsave( filename = 'plot/prev_nsamples.png', plot = p_prev_nsamples, device = 'png', width = 6, height = 6 )
 p_prev_nsamples
 ```
 
 ```{r prev_purity}
-p_prev_purity <- df_prev_cn2_seqz %>% 
-  inner_join( df_rep, by = 'id_rep' ) %>% 
+p_prev_purity <- df_prev_cn2_seqz %>%
   ggplot( aes(x = purity, y = prev_msq) ) +
-  geom_smooth( method = 'loess' ) +
-  geom_point( size = .1 ) +
-  facet_wrap( ~cd_tool, nrow = 1 ) +
-  labs( x = 'tumor purity', y = 'mean squared error' ) +
-  theme_minimal()
-ggsave( filename = 'plot/prev_purity.pdf', plot = p_prev_purity, device = 'pdf', width = 8, height = 3 )
-ggsave( filename = 'plot/prev_purity.png', plot = p_prev_purity, device = 'png', width = 8, height = 3 )
+  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = FALSE) +
+  #scale_fill_distiller(palette= "Spectral", direction=1) +
+  scale_fill_gradient( low = 'white', high = 'red' ) +
+  geom_smooth( se = FALSE, color = 'green3', size = .5 ) +
+  geom_point( size = .5 ) +
+  facet_wrap( ~cd_tool, nrow = 4, scales = 'free_y' ) +
+  labs( x = 'tumor purity', y = 'prevalence error' ) +
+  theme_minimal() +
+  theme( axis.text = element_text(size = 8) ) +
+  theme(legend.position = c(1,0),
+        legend.justification = c(1, 0),
+        legend.direction = 'horizontal')
+p_prev_purity <- shift_legend(p_prev_purity)
+ggsave( filename = 'plot/prev_purity.pdf', plot = p_prev_purity, device = 'pdf', width = 6, height = 6 )
+ggsave( filename = 'plot/prev_purity.png', plot = p_prev_purity, device = 'png', width = 6, height = 6 )
 p_prev_purity
 ```
 
 ```{r prev_nsnvs}
-p_prev_nsnvs <- df_prev_cn2_seqz %>% 
-  inner_join( df_rep, by = 'id_rep' ) %>% 
+p_prev_nsnvs <- df_prev_cn2_seqz %>%
   ggplot( aes(x = n_snvs, y = prev_msq) ) +
-  geom_smooth( method = 'loess' ) +
-  geom_point( size = .1 ) +
-  facet_wrap( ~cd_tool, nrow = 1 ) +
-  labs( x = 'number of SNVs', y = 'mean squared error' ) +
+  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = FALSE) +
+  #scale_fill_distiller(palette= "Spectral", direction=1) +
+  scale_fill_gradient( low = 'white', high = 'red' ) +
+  geom_smooth( se = FALSE, color = 'green3', size = .5 ) +
+  geom_point( size = .5 ) +
+  facet_wrap( ~cd_tool, nrow = 4, scales = 'free_y' ) +
+  labs( x = 'number of SNVs', y = 'prevalence error' ) +
   theme_minimal() +
-  theme( axis.text.x = element_text(angle = 45, hjust = 1) )
-ggsave( filename = 'plot/prev_nsnvs.pdf', plot = p_prev_nsnvs, device = 'pdf', width = 8, height = 3 )
-ggsave( filename = 'plot/prev_nsnvs.png', plot = p_prev_nsnvs, device = 'png', width = 8, height = 3 )
+  theme( axis.text = element_text(size = 8) ) +
+  theme(legend.position = c(1,0),
+        legend.justification = c(1, 0))
+p_prev_nsnvs <- shift_legend(p_prev_nsnvs)
+ggsave( filename = 'plot/prev_nsnvs.pdf', plot = p_prev_nsnvs, device = 'pdf', width = 6, height = 6 )
+ggsave( filename = 'plot/prev_nsnvs.png', plot = p_prev_nsnvs, device = 'png', width = 6, height = 6 )
 p_prev_nsnvs
 ```
 
 ```{r prev_depth}
-p_prev_depth <- df_prev_cn2_seqz %>% 
-  inner_join( df_rep, by = 'id_rep' ) %>% 
+p_prev_depth <- df_prev_cn2_seqz %>%
   ggplot( aes(x = as.factor(depth), y = prev_msq) ) +
-  geom_violin() + geom_boxplot( width = .1 ) +
-  facet_wrap( ~cd_tool, nrow = 2, scales = 'free' ) +
-  labs( x = 'sequencing depth', y = 'mean squared error' ) +
-  theme_minimal()
-ggsave( filename = 'plot/prev_depth.pdf', plot = p_prev_depth, device = 'pdf', width = 8, height = 3 )
-ggsave( filename = 'plot/prev_depth.png', plot = p_prev_depth, device = 'png', width = 8, height = 3 )
+  geom_violin() + geom_boxplot( width = .2 ) +
+  facet_wrap( ~ cd_tool, nrow = 4 ) +
+  labs( x = 'sequencing depth', y = 'prevalence error' ) + 
+  theme_minimal() +
+  theme( legend.position = c(1,0),
+         legend.justification = c(1, 0))
+ggsave( filename = 'plot/prev_depth.pdf', plot = p_prev_depth, device = 'pdf', width = 6, height = 6 )
+ggsave( filename = 'plot/prev_depth.png', plot = p_prev_depth, device = 'png', width = 6, height = 6 )
 p_prev_depth
+```
+
+```{r prev_cnv}
+p_prev_cnv <- df_prev_cn2_seqz %>%
+  ggplot( aes(x = cnv_burden, y = prev_msq) ) +
+  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = FALSE) +
+  scale_fill_gradient( low = 'white', high = 'red' ) +
+  geom_point( size = .1 ) +
+  geom_smooth( se = FALSE, color = 'green3', size = .5 ) +
+  facet_wrap( ~ cd_tool, nrow = 4 ) +
+  labs( x = 'CNV burden', y = 'prevalence error' ) +
+  theme_minimal() +
+  theme( legend.position = c(1,0),
+         legend.justification = c(1, 0),
+         legend.direction = 'horizontal')
+p_prev_cnv <- shift_legend(p_prev_cnv)
+ggsave( filename = 'plot/prev_cnv.pdf', plot = p_prev_cnv, device = 'pdf', width = 6, height = 6 )
+ggsave( filename = 'plot/prev_cnv.png', plot = p_prev_cnv, device = 'png', width = 6, height = 6 )
+p_clust_scores_cnv
+```
+
+```{r prev_cnerr}
+df <- df_clust %>% 
+  dplyr::filter( n_clust_inf > 0, cn_tool == 'seqz', cn_filter == 'cn2' ) %>%
+  inner_join( df_rep, by = 'id_rep' ) %>% 
+  mutate( lbl = fct_reorder(cd_tool, -ARI, .fun = median, na.rm = T) )
+
+p_prev_cnerr <- df_prev_cn2_seqz %>%
+  ggplot( aes(x = log10(seqz_mse), y = prev_msq) ) +
+  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = FALSE) +
+  scale_fill_gradient( low = 'white', high = 'red', limits = c(0, 5) ) +
+  geom_smooth( se = FALSE, color = 'green3', size = .5 ) +
+  geom_point( size = .1 ) +
+  scale_x_continuous( breaks = seq(-6, 0, length.out = 4), 
+                      labels = sprintf('%.2g', 10^(seq(log10(1e-6), log10(1), length.out = 4))) ) +
+  facet_wrap( ~ cd_tool, nrow = 4 ) +
+  labs( x = 'CN inference error', y = 'prevalence error' ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(size = 6),
+        legend.position = c(1,0),
+        legend.justification = c(1, 0),
+        legend.direction = 'horizontal')
+p_prev_cnerr <- shift_legend(p_prev_cnerr)
+ggsave( filename = 'plot/prev_cnerr.pdf', plot = p_prev_cnerr, device = 'pdf', width = 6, height = 6 )
+ggsave( filename = 'plot/prev_cnerr.png', plot = p_prev_cnerr, device = 'png', width = 6, height = 6 )
+p_clust_num_cnerr
 ```
 
 ### Phylogenetic accuracy
