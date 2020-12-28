@@ -1,0 +1,6 @@
+channels:
+dependencies:
+- python=3
+- scipy=1.5.0
+- numpy=1.19.1
+- biopython=1.77

@@ -2,22 +2,19 @@
 # coding: utf-8
 
 import os
-import bisect
 from glob import glob
 import yaml
-#BAMS_TUM = glob_wildcards("data/%s/{sample,R\d+\.bam}" % REPS)
-SAMPLES, = glob_wildcards("sim/bam/{sample,R\d+}.rc.vcf.gz")
-PWD = os.getcwd
-OUTDIR = "pyclone_cn2_seqz"
+SAMPLES, = glob_wildcards("pyclone_cn/{sample,R\d+}.tsv")
+OUTPFX = "pyclone_cn"
 
-rule pyclone_prep:
+rule pyclone_cn_prep:
   input:
-    csv="sequenza/snv.cn2.csv",
+    vcf="sequenza/snv.cn.vcf",
   output:
-    ["%s/%s.tsv" % (OUTDIR, x) for x in SAMPLES]
+    ["%s/%s.tsv" % (OUTPFX, x) for x in SAMPLES]
   params:
-    dir=OUTDIR
-  log: "log/%s_prep.log" % OUTDIR
+    dir = OUTPFX
+  log: "log/%s_prep.log" % OUTPFX
   group: "pyclone"
   shell:
     """
@@ -26,17 +23,16 @@ rule pyclone_prep:
     if [[ ! -d "{params.dir}" ]]; then
       mkdir {params.dir}
     fi
-    python {config[scripts]}/snvs2pyclone.py \
-      --csv {input.csv} \
-      --outdir {params.dir} \
-      #--normal "RN"
+    python {config[scripts]}/vcf2pyclone.py \
+      --vcf {input.vcf} \
+      --outdir {params.dir}
     ) >{log} 2>&1
     """
 
-rule pyclone_yaml:
-  input:  "%s/{sample}.tsv" % OUTDIR
-  output: "%s/{sample}.yaml" % OUTDIR
-  log:    "log/%s_yaml.{sample}.log" % OUTDIR
+rule pyclone_cn_yaml:
+  input:  "%s/{sample}.tsv" % OUTPFX
+  output: "%s/{sample}.yaml" % OUTPFX
+  log:    "log/%s_yaml.{sample}.log" % OUTPFX
   group: "pyclone"
   shell:
     """
@@ -44,7 +40,7 @@ rule pyclone_yaml:
     module load miniconda3/4.7.10
     # to fix https://github.com/conda/conda/issues/8186
     set +eu
-    source activate pyclone
+    source activate {config[tools][pyclone_env]}
     set -eu
     PyClone build_mutations_file \
       --in_file {input} \
@@ -53,25 +49,25 @@ rule pyclone_yaml:
     ) >{log} 2>&1
     """
 
-rule pyclone_conf:
+rule pyclone_cn_conf:
   input:
-    yml=["%s/%s.yaml" % (OUTDIR, x) for x in SAMPLES]
+    yml=["%s/%s.yaml" % (OUTPFX,x) for x in SAMPLES]
   output:
-    cfg="%s/config.yaml" % OUTDIR
+    cfg="%s/config.yaml" % OUTPFX
   group: "pyclone"
   run:
     import os, yaml
     cfg = {
       # Specifies working directory for analysis. All paths in the rest of the file are relative to this.
-      'working_dir': os.path.join(os.getcwd(), OUTDIR),
+      'working_dir': os.path.join(os.getcwd(), OUTPFX),
       # Where the trace (output) from the PyClone MCMC analysis will be written.
       'trace_dir'  : 'trace',
       # Specifies which density will be used to model read counts. Most people will want pyclone_beta_binomial or pyclone_binomial
       #'density'    : 'pyclone_beta_binomial',
       'density'    : 'pyclone_binomial',
       # Number of iterations of the MCMC chain.
-      #'num_iters'  : 10000,
-      'num_iters'  : 25000,
+      'num_iters'  : 10000,
+      #'num_iters'  : 100000,
 
       # Specifies parameters in Beta base measure for DP. Most people will want the values below.
       'base_measure_params': {
@@ -89,21 +85,6 @@ rule pyclone_conf:
           'rate'  : 0.001
         }
       },
-      
-       # Beta-Binomial precision (alpha + beta) prior
-      'beta_binomial_precision_params': {
-        # Starting value
-        'value': 1000,
-        # Parameters for Gamma prior distribution
-        'prior': {
-          'shape': 1.0,
-          'rate': 0.0001
-        },
-        # Precision of Gamma proposal function for MH step
-        'proposal': {
-          'precision': 0.01
-        }
-      },
 
       # Contains one or more sub-entries which specify details about the samples used in the analysis.
       'samples': { x: {
@@ -115,16 +96,14 @@ rule pyclone_conf:
     with open(output.cfg, 'wt') as f_out:
       f_out.write( yaml.dump(cfg) )
 
-rule pyclone:
+rule pyclone_cn:
   input:
-    cfg="%s/config.yaml" % OUTDIR
+    cfg="%s/config.yaml" % OUTPFX
   output:
-    loci="%s/result.loci.tsv" % OUTDIR,
-    clust="%s/result.clusters.tsv" % OUTDIR
-  params:
-    done = "%s/inf.done" % OUTDIR
+    loci="%s/loci.tsv" % OUTPFX,
+    clust="%s/clusters.tsv" % OUTPFX
   log:
-    "log/%s.log" % OUTDIR
+    "log/%s.log" % OUTPFX
   threads: 1
   group: "pyclone"
   resources: mem_mb = 32000, time_mins = 240
@@ -140,25 +119,28 @@ rule pyclone:
     PyClone build_table --config_file {input.cfg} --out_file {output.loci} --table_type loci
     PyClone build_table --config_file {input.cfg} --out_file {output.clust} --table_type cluster
 
-    touch {params.done}
     ) >{log} 2>&1
     """
 
-rule pyclone_post:
+rule pyclone_cn_post:
   input:
-    loci="%s/result.loci.tsv" % OUTDIR,
-    clust="%s/result.clusters.tsv" % OUTDIR
+    loci="%s/loci.tsv" % OUTPFX,
+    clust="%s/clusters.tsv" % OUTPFX,
+    snvs="sim/true.snvs.csv",
+    prev="sim/true.clusters.csv"
   output:
-    snvs="%s/inf.snvs.csv" % OUTDIR,
-    prev="%s/inf.clusters.csv" % OUTDIR
+    snvs="%s/inf.snvs.csv" % OUTPFX,
+    prev="%s/inf.clusters.csv" % OUTPFX,
+    clust_yml="%s/metrics_clustering.yml" % OUTPFX,
+    prev_yml="%s/metrics_prevalence.yml" % OUTPFX
   shell:
     """
     bash {config[scripts]}/pyclone_parse_result.sh \
       {input.clust} {input.loci}
     """
 
-rule pyclone_metrics:
-  input:  
+rule pyclone_cn_metrics:
+  input:
     inf_snvs = "%s/inf.snvs.csv" % OUTPFX,
     inf_prev = "%s/inf.clusters.csv" % OUTPFX,
     true_snvs = "sim/true.snvs.csv",
@@ -181,3 +163,4 @@ rule pyclone_metrics:
       {input.inf_snvs} \
     | tee {output.prev}
     """
+

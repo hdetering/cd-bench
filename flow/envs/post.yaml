@@ -1,0 +1,6 @@
+channels:
+- anaconda
+- etetoolkit
+dependencies:
+- bitarray 
+- ete3

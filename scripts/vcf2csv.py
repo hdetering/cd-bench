@@ -2,31 +2,38 @@
 # vim: syntax=python tabstop=2 expandtab
 # coding: utf-8
 #------------------------------------------------------------------------------
-# Convert infos from multiple VCF files to LICHeE input file.
+# Convert read count info from multisample VCF file to CSV format.
+#
+# INPUT:
+#   VCF with FORMAT fields: AD, DP
+# OUTPUT:
+#   chrom,pos,id_sample,ref,alt,rc_tot,rc_alt
+#
+# For samples which do not carry the mutation, rc_tot is reported as
+# the mean DP of that sample.
 #------------------------------------------------------------------------------
 # author   : Harald Detering
 # email    : harald.detering@gmail.com
-# modified : 2020-04-21
+# modified : 2020-09-08
 #------------------------------------------------------------------------------
 
-from __future__ import print_function
+from __future__ import division, print_function
 import os, sys
 import argparse
-#import csv
 import vcf
 
+out_hdr = 'chrom pos id_sample ref alt rc_tot rc_alt'.split()
+
 def parse_args():
-  parser = argparse.ArgumentParser(description='Create PyClone YAML input file from VCF and copy-number BED.')
-  parser.add_argument('--vcf', required=True, type=argparse.FileType(), help='Multi-sample VCF file with somatic mutations and read counts. (required FORMAT fields: "AD", "DP"')
-  parser.add_argument('--out', required=True, type=argparse.FileType('wt'), help='Output TSV file.')
-  #parser.add_argument('--bed', type=argparse.FileType(), help='BED file with allele-specific copy number.')
-  parser.add_argument('--normal', help='Normal sample id. (default: assume VAF=0.0 for Normal)')
-  parser.add_argument('--nofilt', action='store_true', help='Disable filtering; otherwise only "PASS" variants are output (default: off).')
+  parser = argparse.ArgumentParser(description='Create Cloe input files from VCF.')
+  parser.add_argument('vcf', type=argparse.FileType(), help='Multi-sample VCF file with somatic mutations and read counts. (required FORMAT fields: "AD", "DP"')
+  #parser.add_argument('--outdir', required=True, help='Output directory.')
+  #parser.add_argument('--normal', help='Normal sample id. (default: assume VAF=0.0 for Normal)')
 
   args = parser.parse_args()
   return args
 
-def parse_vcf_record(rec, lbl_samples, add_normal):
+def parse_vcf_record(rec, lbl_samples):
   '''
   Parse a multi-sample VCF record.
   Determine major ALT allele and calculate VAF for each sample.
@@ -65,44 +72,46 @@ def parse_vcf_record(rec, lbl_samples, add_normal):
         rc[i] = ad[idx_maj+1]
       dp[i] = getattr(cdata, 'DP')
       
-  #rc = [getattr(c.data, 'AD')[idx_maj+1] if getattr(c.data, 'AD') else None for c in samples]
-  # get depth for each sample
-  #dp = [getattr(c.data, 'DP') for c in samples]
   # calculate VAFs
   vaf = [float(a)/float(d) if (a and d) else 0.0 for a, d in zip(rc, dp)]
-  if add_normal:
-    vaf = [0.0] + vaf
 
-  desc = rec.ID if rec.ID else '.' 
-  #desc = '{}/{}'.format(rec.REF, major_allele)
-  out = [rec.CHROM, str(rec.POS), desc] + ['{:.4f}'.format(x) for x in vaf]
+  out  = [rec.CHROM, str(rec.POS), rec.REF, str(major_allele)] 
+  out += [(dp[i], rc[i], x) for i, x in enumerate(vaf)]
   return out
 
 def main(args):
-
   # get samples from input VCF
   rdr = vcf.Reader(filename=args.vcf.name)
   samples = rdr.samples
-  do_add_normal = (args.normal is None)
-  assert do_add_normal or args.normal in samples
-  # make sure normal sample is first in list
-  if args.normal:
-    samples = [args.normal] + [x for x in samples if x != args.normal]
-
-  # construct header
-  fh_out = args.out
-  hdr = "#chr position description Normal".split()
-  if do_add_normal:
-    hdr += samples
-  else:
-    hdr += samples[1:]
-  fh_out.write('\t'.join(hdr) + '\n')
 
   # parse variants
+  num_loc = [0] * len(samples)
+  sum_depth = [0] * len(samples)
+  var_data = []
   for rec in rdr:
-    var_data = parse_vcf_record(rec, samples, do_add_normal)
-    if True: #len(var_line) == len(hdr):
-      fh_out.write('\t'.join(var_data) + '\n')
+    vdat = parse_vcf_record(rec, samples)
+    var_data.append(vdat)
+    for i in range(len(samples)):
+      tot, alt, vaf = vdat[4+i]
+      if not tot is None:
+        num_loc[i] += 1
+        sum_depth[i] += tot
+  mean_depth = [round(dp / nloc) if nloc > 0 else 0 for dp, nloc in zip(sum_depth, num_loc)]
+
+  # write header
+  print(','.join(out_hdr))
+
+  for vdat in var_data:
+    chrom, pos, ref, alt = vdat[:4]
+    out_dat_alt = ['{}_{}'.format(chrom, pos)]
+    out_dat_tot = ['{}_{}'.format(chrom, pos)]
+    for i, id_smp in enumerate(samples):
+      dp, rc_alt, vaf = vdat[4+i]
+      if dp is None: # if variant is not present in this sample, fill in mean depth
+        dp = mean_depth[i]
+        rc_alt = 0
+      out_dat = [chrom, pos, id_smp, ref, alt, str(dp), str(rc_alt)]
+      print(','.join(out_dat))
 
 if __name__ == '__main__':
   args = parse_args()

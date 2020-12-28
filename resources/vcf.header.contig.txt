@@ -1,0 +1,10 @@
+##contig=<ID=chr1,length=1000000>
+##contig=<ID=chr2,length=1000000>
+##contig=<ID=chr3,length=1000000>
+##contig=<ID=chr4,length=1000000>
+##contig=<ID=chr5,length=1000000>
+##contig=<ID=chr6,length=1000000>
+##contig=<ID=chr7,length=1000000>
+##contig=<ID=chr8,length=1000000>
+##contig=<ID=chr9,length=1000000>
+##contig=<ID=chr10,length=1000000>

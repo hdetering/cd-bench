@@ -1,39 +1,39 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python2
 # vim: syntax=python tabstop=2 expandtab
 # coding: utf-8
 #------------------------------------------------------------------------------
-# Convert infos from multiple VCF files to LICHeE input file.
+# Convert multi-sample VCF to SPRUCE input file.
 #------------------------------------------------------------------------------
 # author   : Harald Detering
 # email    : harald.detering@gmail.com
-# modified : 2020-04-21
+# modified : 2020-08-16
 #------------------------------------------------------------------------------
 
 from __future__ import print_function
 import os, sys
 import argparse
-#import csv
 import vcf
+import spruce_convert
+
+out_hdr = '#id_sample lbl_sample id_mut lbl_mut vaf_lb vaf_mean vaf_ub x y mu'
 
 def parse_args():
-  parser = argparse.ArgumentParser(description='Create PyClone YAML input file from VCF and copy-number BED.')
+  parser = argparse.ArgumentParser(description='Create SPRUCE input file from VCF.')
   parser.add_argument('--vcf', required=True, type=argparse.FileType(), help='Multi-sample VCF file with somatic mutations and read counts. (required FORMAT fields: "AD", "DP"')
   parser.add_argument('--out', required=True, type=argparse.FileType('wt'), help='Output TSV file.')
-  #parser.add_argument('--bed', type=argparse.FileType(), help='BED file with allele-specific copy number.')
-  parser.add_argument('--normal', help='Normal sample id. (default: assume VAF=0.0 for Normal)')
-  parser.add_argument('--nofilt', action='store_true', help='Disable filtering; otherwise only "PASS" variants are output (default: off).')
+  parser.add_argument('--normal', help='Normal sample id. (Will be ignored if present)')
 
   args = parser.parse_args()
   return args
 
-def parse_vcf_record(rec, lbl_samples, add_normal):
+def parse_vcf_record(rec, lbl_samples):
   '''
   Parse a multi-sample VCF record.
   Determine major ALT allele and calculate VAF for each sample.
   
   OUTPUT: 
-    list with the following columns:
-      #chr position description Normal
+    list with the following elements:
+      CHROM_POS REF ALT (S1:ref, S1:alt) [(S2:ref, S2:alt) [...]]
     empty list if no consensus var.
   '''
   out = []
@@ -64,46 +64,55 @@ def parse_vcf_record(rec, lbl_samples, add_normal):
       if ad:
         rc[i] = ad[idx_maj+1]
       dp[i] = getattr(cdata, 'DP')
-      
-  #rc = [getattr(c.data, 'AD')[idx_maj+1] if getattr(c.data, 'AD') else None for c in samples]
-  # get depth for each sample
-  #dp = [getattr(c.data, 'DP') for c in samples]
-  # calculate VAFs
-  vaf = [float(a)/float(d) if (a and d) else 0.0 for a, d in zip(rc, dp)]
-  if add_normal:
-    vaf = [0.0] + vaf
 
-  desc = rec.ID if rec.ID else '.' 
-  #desc = '{}/{}'.format(rec.REF, major_allele)
-  out = [rec.CHROM, str(rec.POS), desc] + ['{:.4f}'.format(x) for x in vaf]
+  # compile REF/ALT counts
+  alt = [  x if x else 0 for   x in rc]
+  ref = [d-a if d else 0 for a,d in zip(alt, dp)]
+
+  id_var = '{}_{}'.format(rec.CHROM, str(rec.POS))
+  out = [id_var] + [(r, a) for r,a in zip(ref, alt)]
   return out
 
 def main(args):
-
   # get samples from input VCF
   rdr = vcf.Reader(filename=args.vcf.name)
   samples = rdr.samples
-  do_add_normal = (args.normal is None)
-  assert do_add_normal or args.normal in samples
+  assert args.normal in samples
   # make sure normal sample is first in list
   if args.normal:
     samples = [args.normal] + [x for x in samples if x != args.normal]
 
+  # parse variants
+  mut_rc = [] # [id_mut, (ref_RN, alt_RN), (ref_R1, alt_R1), ...]
+  for rec in rdr:
+    rc_data = parse_vcf_record(rec, samples)
+    # make sure that mutation is present in at least one sample
+    rc_alt = sum([a for r,a in rc_data[2:]])
+    if rc_alt > 0:
+      mut_rc.append(rc_data)
+
   # construct header
   fh_out = args.out
-  hdr = "#chr position description Normal".split()
-  if do_add_normal:
-    hdr += samples
-  else:
-    hdr += samples[1:]
-  fh_out.write('\t'.join(hdr) + '\n')
-
-  # parse variants
-  for rec in rdr:
-    var_data = parse_vcf_record(rec, samples, do_add_normal)
-    if True: #len(var_line) == len(hdr):
-      fh_out.write('\t'.join(var_data) + '\n')
+  hdr  = '{} # number of samples\n'.format(len(samples)-1)
+  hdr += '{} # number of SNVs\n'.format(len(mut_rc))
+  hdr += '\t'.join(out_hdr.split()) + '\n'
+  fh_out.write(hdr)
+  # write variants
+  for i, mut in enumerate(mut_rc):
+    for j in range(len(samples)-1):
+      rc_ref, rc_alt = mut[j+2]
+      # calculate limits of confidence interval (highest posterior density region)
+      mode = 0; lb = 0; ub = 0
+      if rc_alt+rc_ref > 0:
+        mode, lb, ub = spruce_convert.binomial_hpdr(rc_alt, rc_alt+rc_ref, 0.999)
+      out  = '{}\t{}'.format(j, samples[j+1])
+      out += '\t{}\t{}'.format(i, mut[0])
+      out += '\t{:.4f}\t{:.4f}\t{:.4f}'.format(lb, mode, ub)
+      # CN1, CN2, prev
+      out += '\t{}\t{}\t{}'.format(1, 1, 1)
+      fh_out.write(out + '\n')
 
 if __name__ == '__main__':
   args = parse_args()
+
   main(args)

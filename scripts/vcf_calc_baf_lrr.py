@@ -47,8 +47,7 @@ def calc_baf(rec):
   i_max = [i for i,v in enumerate(sum_ad) if v == max_ad]
   i_maj = i_max[0] if len(i_max)==1 else random.choice(i_max)
   # calculate BAF of major allele for all samples
-  #import pdb; pdb.set_trace()
-  baf = [float(c.data.AD[i_maj+1])/c.data.DP if c.data.AD else None for c in rec.samples]
+  baf = [float(c.data.AD[i_maj+1])/c.data.DP if (c.data.AD and c.data.AD[i_maj+1]) else None for c in rec.samples]
   
   return baf
   
@@ -63,9 +62,6 @@ def parse_record(rec, idx_normal, mean_dp):
     - set BAF to AD(ALT)/DP
     - set LRR to log2(DP/mean_dp)
   '''
-  # only proceed if normal sample has variant
-  if rec.samples[idx_normal].data.DP is None:
-    return None
   # create new CallData class (NamedTuple)
   old_keys = list(rec.samples[idx_normal].data._fields)
   cd = vcf.parser.make_calldata_tuple(old_keys + ['BAF', 'LRR'])
@@ -78,7 +74,7 @@ def parse_record(rec, idx_normal, mean_dp):
     if not rec.samples[i].data.DP is None:
       rr = float(rec.samples[i].data.DP) / mean_dp
       lrr = math.log2(rr) if rr > 0 else 0.0
-    s_lrr = '{:0.4f}'.format(lrr) if lrr else None
+    s_lrr = '{:0.4f}'.format(lrr) if (not lrr is None) else None
     s_baf = '{:0.4f}'.format(baf[i]) if baf[i] else None
     old_vals = list(rec.samples[i].data._asdict().values())
     data = cd(*(old_vals + [s_baf, s_lrr]))
@@ -109,8 +105,8 @@ def main(args):
   mean_dp = 0.0
   for rec in rdr:
     if rec.CHROM == chrom:
+      recs.append(rec)
       if rec.samples[idx_normal].data.DP:
-        recs.append(rec)
         sum_dp += rec.samples[idx_normal].data.DP
         num_rec += 1
     else: # passed end of chromosome
@@ -130,6 +126,15 @@ def main(args):
       else:
         sum_dp = 0
         num_rec = 0
+
+  # process records of last chromosome
+  if len(recs) > 0:
+    mean_dp = float(sum_dp) / num_rec
+    # 2nd pass
+    for r in recs:
+      rec_out = parse_record(r, idx_normal, mean_dp)
+      if rec_out:
+        wtr.write_record(rec_out)
 
 if __name__ == '__main__':
   args = parse_args()

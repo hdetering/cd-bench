@@ -10,7 +10,7 @@
 #   - INFERRED tree (CSV: from,to)
 #   - INFERRED variant-to-cluster assignment (CSV: id,chrom,pos,id_var,id_cluster)
 # Output:
-#   distance value
+#   distance value(s)
 #------------------------------------------------------------------------------
 # author   : Harald Detering
 # email    : harald.detering@gmail.com

@@ -8,9 +8,9 @@ import yaml
 #BAMS_TUM = glob_wildcards("data/%s/{sample,R\d+\.bam}" % REPS)
 SAMPLES, = glob_wildcards("sim/bam/{sample,R\d+}.rc.vcf.gz")
 PWD = os.getcwd
-OUTDIR = "pyclone_cn2_seqz"
+OUTDIR = "pyclone_conn_cn2_seqz"
 
-rule pyclone_prep:
+rule pyclone_conn_prep:
   input:
     csv="sequenza/snv.cn2.csv",
   output:
@@ -33,7 +33,7 @@ rule pyclone_prep:
     ) >{log} 2>&1
     """
 
-rule pyclone_yaml:
+rule pyclone_conn_yaml:
   input:  "%s/{sample}.tsv" % OUTDIR
   output: "%s/{sample}.yaml" % OUTDIR
   log:    "log/%s_yaml.{sample}.log" % OUTDIR
@@ -53,7 +53,7 @@ rule pyclone_yaml:
     ) >{log} 2>&1
     """
 
-rule pyclone_conf:
+rule pyclone_conn_conf:
   input:
     yml=["%s/%s.yaml" % (OUTDIR, x) for x in SAMPLES]
   output:
@@ -72,6 +72,8 @@ rule pyclone_conf:
       # Number of iterations of the MCMC chain.
       #'num_iters'  : 10000,
       'num_iters'  : 25000,
+      # How to initialize clusters (connected: all muts in single cluster, disconnected: each mut in own cluster)
+      'init_method' : 'connected',
 
       # Specifies parameters in Beta base measure for DP. Most people will want the values below.
       'base_measure_params': {
@@ -115,7 +117,7 @@ rule pyclone_conf:
     with open(output.cfg, 'wt') as f_out:
       f_out.write( yaml.dump(cfg) )
 
-rule pyclone:
+rule pyclone_conn:
   input:
     cfg="%s/config.yaml" % OUTDIR
   output:
@@ -144,7 +146,7 @@ rule pyclone:
     ) >{log} 2>&1
     """
 
-rule pyclone_post:
+rule pyclone_conn_post:
   input:
     loci="%s/result.loci.tsv" % OUTDIR,
     clust="%s/result.clusters.tsv" % OUTDIR
@@ -157,7 +159,7 @@ rule pyclone_post:
       {input.clust} {input.loci}
     """
 
-rule pyclone_metrics:
+rule pyclone_conn_metrics:
   input:  
     inf_snvs = "%s/inf.snvs.csv" % OUTPFX,
     inf_prev = "%s/inf.clusters.csv" % OUTPFX,

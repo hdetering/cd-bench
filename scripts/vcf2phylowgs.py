@@ -2,11 +2,11 @@
 # vim: syntax=python tabstop=2 expandtab
 # coding: utf-8
 #------------------------------------------------------------------------------
-# Convert infos from multiple VCF files to LICHeE input file.
+# Convert multi-sample VCF to PhyloWGS input file.
 #------------------------------------------------------------------------------
 # author   : Harald Detering
 # email    : harald.detering@gmail.com
-# modified : 2020-04-21
+# modified : 2020-08-24
 #------------------------------------------------------------------------------
 
 from __future__ import print_function
@@ -19,9 +19,7 @@ def parse_args():
   parser = argparse.ArgumentParser(description='Create PyClone YAML input file from VCF and copy-number BED.')
   parser.add_argument('--vcf', required=True, type=argparse.FileType(), help='Multi-sample VCF file with somatic mutations and read counts. (required FORMAT fields: "AD", "DP"')
   parser.add_argument('--out', required=True, type=argparse.FileType('wt'), help='Output TSV file.')
-  #parser.add_argument('--bed', type=argparse.FileType(), help='BED file with allele-specific copy number.')
   parser.add_argument('--normal', help='Normal sample id. (default: assume VAF=0.0 for Normal)')
-  parser.add_argument('--nofilt', action='store_true', help='Disable filtering; otherwise only "PASS" variants are output (default: off).')
 
   args = parser.parse_args()
   return args
@@ -33,7 +31,7 @@ def parse_vcf_record(rec, lbl_samples, add_normal):
   
   OUTPUT: 
     list with the following columns:
-      #chr position description Normal
+      #chr position (alt_count1, tot_count1), ...
     empty list if no consensus var.
   '''
   out = []
@@ -65,17 +63,7 @@ def parse_vcf_record(rec, lbl_samples, add_normal):
         rc[i] = ad[idx_maj+1]
       dp[i] = getattr(cdata, 'DP')
       
-  #rc = [getattr(c.data, 'AD')[idx_maj+1] if getattr(c.data, 'AD') else None for c in samples]
-  # get depth for each sample
-  #dp = [getattr(c.data, 'DP') for c in samples]
-  # calculate VAFs
-  vaf = [float(a)/float(d) if (a and d) else 0.0 for a, d in zip(rc, dp)]
-  if add_normal:
-    vaf = [0.0] + vaf
-
-  desc = rec.ID if rec.ID else '.' 
-  #desc = '{}/{}'.format(rec.REF, major_allele)
-  out = [rec.CHROM, str(rec.POS), desc] + ['{:.4f}'.format(x) for x in vaf]
+  out = [rec.CHROM, str(rec.POS)] + [(rc[i], dp[i]) for i in idx_smp]
   return out
 
 def main(args):
@@ -89,20 +77,38 @@ def main(args):
   if args.normal:
     samples = [args.normal] + [x for x in samples if x != args.normal]
 
+  # parse variants
+  var_data = []
+  smp_dp   = [0] * len(samples) # store cumulative depth per sample
+  smp_nvar = [0] * len(samples) # store number of variants per sample
+  for rec in rdr:
+    vdat = parse_vcf_record(rec, samples, do_add_normal)
+    var_data.append(vdat)
+    for i in range(len(samples)):
+      dp = vdat[2+i][1]
+      if not dp is None:
+        smp_dp[i] += dp
+        smp_nvar[i] += 1
+  # calculate mean depth per sample
+  smp_mean_dp = [round(dp/nvar) if nvar>0 else 0 for dp, nvar in zip(smp_dp, smp_nvar)]
+
   # construct header
   fh_out = args.out
-  hdr = "#chr position description Normal".split()
-  if do_add_normal:
-    hdr += samples
-  else:
-    hdr += samples[1:]
+  hdr = "id gene a d mu_r mu_v".split()
   fh_out.write('\t'.join(hdr) + '\n')
 
-  # parse variants
-  for rec in rdr:
-    var_data = parse_vcf_record(rec, samples, do_add_normal)
+  # write output vars
+  idx_var = 0
+  for vdat in var_data:
     if True: #len(var_line) == len(hdr):
-      fh_out.write('\t'.join(var_data) + '\n')
+      id_mut = 's{}'.format(idx_var)
+      id_gene = '{}_{}'.format(vdat[0], vdat[1])
+      alt = ','.join([str(a) if a else '0' for a, d in vdat[2:]][1:])
+      tot = ','.join([str(a_d[1]) if a_d[1] else str(smp_mean_dp[i]) for i,a_d in enumerate(vdat[2:])][1:])
+      out_data = [id_mut, id_gene, alt, tot, '0.999', '0.499']
+      fh_out.write('\t'.join(out_data) + '\n')
+      idx_var += 1
+  
 
 if __name__ == '__main__':
   args = parse_args()

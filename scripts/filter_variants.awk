@@ -41,7 +41,6 @@ BEGIN {
       rc_alt = max_ad;
     }
   }
-
   # print variant line if filter criteria met
   if (rc_alt>=rc_min && rc_alt/rc_tot>=vaf_min) {
     print;

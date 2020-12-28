@@ -1,6 +1,7 @@
 # vim: syntax=python tabstop=2 expandtab
 # coding: utf-8
 
+# index FASTA file
 rule ref_index:
   input:
     "{ref}.fa"
@@ -26,34 +27,142 @@ rule ref_index:
     """
 
 # Merge VCF files from multiple samples into single VCF
-rule merge_vcf:
-    input:
-       ref="ref.fa",
-       vcf1="{tool}/R1.vcf",
-       vcf2="{tool}/R2.vcf",
-       vcf3="{tool}/R3.vcf",
-       vcf4="{tool}/R4.vcf",
-       vcf5="{tool}/R5.vcf"
-    output: 
-       "{tool,[^\./]+}.vcf"
-    log:
-       "log/{tool}.GATK_CombineVariants.log"
-    shell:
-        """
-        #module load jdk/8u171
-        module load jdk/8u181
-        time (
-           {config[tools][gatk3]} -T CombineVariants \
-             -R {input.ref} \
-             --variant {input.vcf1} \
-             --variant {input.vcf2} \
-             --variant {input.vcf3} \
-             --variant {input.vcf4} \
-             --variant {input.vcf5} \
-             -o {output} \
-             -genotypeMergeOptions UNIQUIFY
-        ) 1>{log} 2>&1
-        """
+rule combine_cn_vcfs:
+  input:
+    nrm="bcftools_cnv/RN.cn.inf.vcf.gz"
+  output: 
+    "sim/snvs.cn.vcf.gz"
+  log:
+    "log/combine_cn_vcfs.log"
+  shell:
+    """
+    module load bcftools
+    time (
+    fn=$(basename {input.nrm})
+    python {config[scripts]}/combine_vcfs.py $(
+      for f in ${{{input.nrm}//RN/R*}}; do
+        fn=$(basename $f);
+        printf " --vcf %s:%s" ${fn%.cn.inf.vcf.gz} $f;
+      done)
+      --out {output}
+    ) 1>{log} 2>&1
+    """
+#rule combine_cn_vcfs:
+#  input:
+#    nrm="bcftools_cnv/RN.cn.inf.vcf.gz"
+#  output: 
+#    "sim/snvs.cn.vcf.gz"
+#  log:
+#    "log/combine_cn_vcfs.log"
+#  shell:
+#    """
+#    time (
+#    fn=$(basename {input.nrm})
+#    python {config[scripts]}/combine_vcfs.py $(
+#      for f in ${{{input.nrm}//RN/R*}}; do
+#        fn=$(basename $f);
+#        printf " --vcf %s:%s" ${fn%.cn.inf.vcf.gz} $f;
+#      done)
+#      --out {output}
+#    ) 1>{log} 2>&1
+#    """
+
+# Create sequence dictionary for reference
+rule gatk_create_seq_dict:
+  input:  "sim/ref.fa.gz"
+  output: "sim/ref.dict"
+  shell:
+    """
+    module load gatk/4.1.6.0
+    gatk CreateSequenceDictionary -R {input}
+    """
+
+# Change contig records in VCF header
+rule vcf_header_replace_contigs:
+  input:  "bcftools_cnv/{sample}.cn.inf.vcf.gz"
+  output: "bcftools_cnv/{sample}.cn.inf.mod.vcf"
+  shell:
+    """
+    fn={input}
+    zcat $fn > ${{fn%.gz}}
+    awk -f {config[scripts]}/vcf_header_replace_contigs.awk \
+      {config[resources]}/vcf.header.contig.txt \
+      ${{fn%.gz}} \
+    > {output}
+    """
+
+# Sort VCF files
+rule bcftools_sort:
+  input:  "bcftools_cnv/{sample}.cn.inf.mod.vcf"
+  output: "bcftools_cnv/{sample}.cn.inf.sort.vcf"
+  shell:
+    """
+    module load bcftools
+    bcftools sort {input} > {output}
+    """
+
+# Merge VCF files from multiple samples into single VCF
+rule combine_variants_tail:
+  input:
+    vcf=["bcftools_cnv/{}.cn.inf.vcf.gz".format(s) for s in SAMPLES_TUM]
+  output: 
+    "sim/snv.cn.tail.vcf"
+  params:
+    var=" ".join(["bcftools_cnv/{}.cn.inf.vcf.gz".format(s) for s in SAMPLES_TUM])
+  log:
+    "log/combine_variants.log"
+  shell:
+    """
+    module load bcftools
+    time (
+    set -x
+    bcftools merge --force-samples {params.var} \
+    | awk '/^##/{{print;next}}/^#CHROM/||$3!~/^g/{{printf $1;for(i=2;i<=NF;i++){{if(i<=11||i%2==1)printf "\\t"$i}};printf "\\n"}}' \
+    | awk -f {config[scripts]}/vcf_fix_AD.awk \
+    > {output}
+    ) 1>{log} 2>&1
+    """
+# Merge VCF files from multiple samples into single VCF
+#rule combine_variants:
+#  input:
+#    ref="sim/ref.fa",
+#    vcf=["bcftools_cnv/{}.cn.inf.sort.vcf".format(s) for s in SAMPLES_TUM]
+#  output: 
+#    "sim/snv.cn.vcf"
+#  params:
+#    var=" ".join(["-V bcftools_cnv/{}.cn.inf.sort.vcf".format(s) for s in SAMPLES_TUM])
+#  log:
+#    "log/combine_variants.log"
+#  shell:
+#    """
+#    module load jdk/8u181
+#    time (
+#      {config[tools][gatk3]} -T CombineVariants \
+#        -R {input.ref} \
+#        {params.var} \
+#        -o {output} \
+#        -genotypeMergeOptions UNSORTED
+#    ) 1>{log} 2>&1
+#    """
+
+# Filter multi-sample for variants with all samples having inferred copy number =2
+rule vcf_filt_cn2_strict:
+  input:  "sim/snv.cn.vcf"
+  output: "sim/snv.cn2.strict.vcf"
+  shell:
+    """
+    module load bcftools
+    bcftools view -e 'FMT/CNI!=2 & FMT/CNI!="."' {input} > {output}
+    """ 
+
+# Filter multi-sample for variants, exclude samples having inferred copy number !=2
+rule vcf_filt_cn2_relaxed:
+  input:  "sim/snv.cn.vcf"
+  output: "sim/snv.cn2.relaxed.vcf"
+  shell:
+    """
+    awk -f {config[scripts]}/vcf_filt_cn2_relaxed.awk {input} > {output}
+    """ 
 
 # create pileup from bam
 rule bam2pileup:

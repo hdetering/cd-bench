@@ -5,13 +5,13 @@
 # Parse LICHeE output file to extract clusters and tree.
 #
 # Output:
-#  - cluster.csv : id_cluster,presence,mean_freq
-#  - snv.csv     . id_snv,chrom,pos,id_cluster
+#  - cluster.csv : id_cluster,id_sample,freq
+#  - snv.csv     . chrom_pos,id_cluster,id_snv
 #  - tree.csv    . id_tree,from_cluster,to_cluster
 #------------------------------------------------------------------------------
 # author   : Harald Detering
 # email    : harald.detering@gmail.com
-# modified : 2020-05-17
+# modified : 2020-07-10
 #------------------------------------------------------------------------------
 
 import os, sys
@@ -34,10 +34,12 @@ def parse_lichee(fh):
   clusters = {}
   trees = {}
   snvs = {}
+  samples = []
 
   do_parse_clusters = False
-  do_parse_trees = False
-  do_parse_snvs = False
+  do_parse_trees    = False
+  do_parse_samples  = False
+  do_parse_snvs     = False
 
   id_tree = -1
 
@@ -51,9 +53,13 @@ def parse_lichee(fh):
       do_parse_trees = True
       m = re.search('Tree (\d+)', line)
       id_tree = int(m.group(1))
+    elif line.startswith('Sample decomposition:'):
+      print('Parsing samples')
+      do_parse_trees = False
+      do_parse_samples = True
     elif line.startswith('SNV info:'):
       print('Parsing SNVs...')
-      do_parse_trees = False
+      do_parse_samples = False
       do_parse_snvs = True
     elif do_parse_clusters:
       cols = line.strip().split('\t')
@@ -66,16 +72,20 @@ def parse_lichee(fh):
       m = re.search('(\d+) -> (\d+)', line)
       if m:
         trees[id_tree].append((m.group(1), m.group(2)))
+    elif do_parse_samples:
+      m = re.search('Sample lineage decomposition: (.+)$', line)
+      if m:
+        samples.append(m.group(1))
     elif do_parse_snvs:
       m = re.search('(snv\d+): (\w+) (\d+) ([a-zA-Z0-9]+)$', line)
       if m:
         snvs[m.group(1)] = (m.group(2), m.group(3), m.group(4))
   
-  return clusters, trees, snvs 
+  return clusters, trees, samples, snvs 
 
 def main(args):
   print(args)
-  clusters, trees, variants = parse_lichee(args['lichee_result'])
+  clusters, trees, samples, variants = parse_lichee(args['lichee_result'])
 
   print("%d clusters" % len(clusters))
   print("%d trees" % len(trees))
@@ -85,17 +95,26 @@ def main(args):
   snv_clust = {}
 
   # write clusters to file
-  fn_clust = os.path.join(args['outdir'], 'lichee.clusters.csv')
+  fn_clust = os.path.join(args['outdir'], 'inf.clusters.csv')
   with open(fn_clust, 'wt') as f:
-    f.write('id_cluster,pres,freq\n')
+    f.write('id_cluster,id_sample,freq\n')
     for id_clust in sorted(clusters.keys()):
       pres, freq, snvs = clusters[id_clust]
-      f.write('{},{},{}\n'.format(id_clust, pres, freq))
+      lst_freq = re.findall('\d\.\d+', freq)
+      h = 0
+      for i, p in enumerate(pres):
+        if i == 0: # skip normal sample (sample ids do not match)
+          continue
+        freq_val = "0.0"
+        if p == '1':
+          freq_val = lst_freq[h]
+          h += 1
+        f.write('{},{},{}\n'.format(id_clust, samples[i], freq_val))
       for id_snv in snvs:
         snv_clust[id_snv] = id_clust
 
   # write trees to file
-  fn_trees = os.path.join(args['outdir'], 'lichee.trees.csv')
+  fn_trees = os.path.join(args['outdir'], 'inf.trees.csv')
   with open(fn_trees, 'wt') as f:
     f.write('id_tree,from,to\n')
     for id_tree in sorted(trees.keys()):
@@ -103,12 +122,12 @@ def main(args):
         f.write('{},{},{}\n'.format(id_tree, from_to[0], from_to[1]))
 
   # write variants to file
-  fn_snvs = os.path.join(args['outdir'], 'lichee.snvs.csv')
+  fn_snvs = os.path.join(args['outdir'], 'inf.snvs.csv')
   with open(fn_snvs, 'wt') as f:
-    f.write('id_mut,id_cluster,id_snv,chrom,pos\n')
+    f.write('chrom_pos,id_cluster,id_snv\n')
     for id_snv in sorted(variants.keys()):
       chrom, pos, name = variants[id_snv]
-      f.write('{},{},{},{},{}\n'.format(name, snv_clust[id_snv], id_snv, chrom, pos))
+      f.write('chr{}_{},{},{}\n'.format(chrom, pos, snv_clust[id_snv], id_snv))
 
 if __name__ == '__main__':
   args = parse_args()
